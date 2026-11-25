@@ -36,6 +36,7 @@
   <select id="tz" title="Часовой пояс"><option value="UTC">UTC</option><option value="local">Локальное</option></select>
   <select id="theme" title="Тема"><option value="dark">Тёмная</option><option value="light">Светлая</option></select>
   <span class="grow"></span>
+  <button id="btnMql" title="Скрипты и индикаторы MQL4/MQL5">MQL</button>
   <button id="btnInd" title="Индикаторы">ƒ Индикаторы</button>
   <button id="togWatch" class="on" title="Обзор рынка">Обзор</button>
   <button id="togInfo" class="on" title="Нижняя панель">Инфо</button>
@@ -64,6 +65,18 @@
   <div class="dlgrow"><select id="indAdd"></select><button id="indAddBtn">Добавить</button>
     <span class="grow"></span><select id="tplSel"></select><button id="tplApply">Применить</button><button id="tplSave">Сохранить шаблон</button><button id="tplDel">Удалить</button></div>
   <div id="indList"></div>
+</div></div>
+
+<div id="mqlDlg" class="dlg hidden"><div class="dlgbox mqlbox">
+  <div class="dlghead"><b>MQL: библиотека</b><span id="mqlMsg"></span><button id="mqlClose">✕</button></div>
+  <div class="dlgrow"><input type="file" id="mqlFile" accept=".mq4,.mq5,.ex4,.ex5"><button id="mqlNew">Новый индикатор</button></div>
+  <div class="mqlcols"><div id="mqlList"></div>
+    <div id="mqlEd" class="hidden">
+      <div class="dlgrow"><input id="mqlName" placeholder="Имя"><select id="mqlVer"></select><button id="mqlSave">Сохранить версию</button><button id="mqlDesc">Разобрать</button><button id="mqlRun" class="on">Добавить на график</button><button id="mqlLogsBtn">Логи</button><button id="mqlDel">Удалить</button></div>
+      <div id="mqlInputs"></div>
+      <textarea id="mqlSrc" spellcheck="false"></textarea>
+      <pre id="mqlLogs" class="hidden"></pre>
+    </div></div>
 </div></div>
 
 <div id="authDlg" class="dlg"><div class="dlgbox authbox">

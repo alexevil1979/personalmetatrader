@@ -61,3 +61,14 @@ main{flex:1;display:flex;min-height:0}
 #authLinks{display:flex;gap:14px}#authLinks a{color:var(--acc);cursor:pointer}
 #authMsg{color:var(--dn);min-height:16px}
 #userBox{display:flex;align-items:center;gap:6px;color:var(--mut)}
+.mqlbox{width:min(1000px,97vw);height:82vh;display:flex;flex-direction:column;margin-top:-30px}
+.mqlcols{display:flex;gap:8px;flex:1;min-height:0}
+#mqlList{width:210px;overflow:auto;border:1px solid var(--line);border-radius:4px}
+.mrow{display:flex;justify-content:space-between;gap:6px;padding:5px 8px;cursor:pointer;border-bottom:1px solid var(--line)}
+.mrow.sel{background:var(--bg);border-left:2px solid var(--acc)}
+.badge{font-size:10px;padding:0 5px;border:1px solid var(--line);border-radius:8px}.badge.bad{color:var(--dn);border-color:var(--dn)}
+#mqlEd{flex:1;display:flex;flex-direction:column;min-width:0;gap:6px}
+#mqlSrc{flex:1;min-height:180px;font:12px/1.4 Consolas,monospace;resize:none;white-space:pre;tab-size:3}
+#mqlInputs{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}#mqlInputs label{color:var(--mut)}#mqlInputs input{width:90px}#mqlInputs pre{width:100%;margin:2px 0}
+#mqlLogs{max-height:160px;overflow:auto;background:var(--bg);border:1px solid var(--line);padding:6px;margin:0;white-space:pre-wrap}
+#mqlMsg{flex:1;margin-left:10px}

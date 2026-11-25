@@ -297,6 +297,7 @@
     }
     scheduleInd(newBar) {
       if (!this.cfg.indicators.length) return;
+      this.cfg.indicators.filter((x) => x.type === 'mql' && x.visible !== false).forEach((x) => this.runMql(x, !newBar));
       if (newBar) { clearTimeout(this.indT); this.indT = null; this.refreshIndicators(false); return; }
       if (this.indT) return;
       this.indT = setTimeout(() => { this.indT = null; this.refreshIndicators(false); }, 1000); // throttled recompute
@@ -310,6 +311,7 @@
       let paneIdx = 0; const markers = [];
       for (const inst of this.cfg.indicators) {
         if (inst.visible === false) continue;
+        if (inst.type === 'mql') { const r = this.mqlItem(inst, full, paneIdx); if (r === 'sep') paneIdx++; continue; }
         const def = PMTInd.REG[inst.type]; if (!def) continue;
         let it = this.ind.find((x) => x.inst === inst);
         if (!it) { if (!def.overlay) paneIdx++; it = { inst, pane: def.overlay ? 0 : paneIdx, series: {}, lv: [], out: null }; this.ind.push(it); this.buildItem(it, def); } else if (!def.overlay) paneIdx = Math.max(paneIdx, it.pane);
@@ -341,6 +343,46 @@
       if (markers.length || this.mk) { if (!this.mk) this.mk = LightweightCharts.createSeriesMarkers(this.main, []); this.mk.setMarkers(markers); }
       if (full && paneIdx > 0) { try { this.chart.panes()[0].setStretchFactor(3); } catch { /* old api */ } }
     }
+
+    // ---------- MQL scripts (executed server-side in the sandbox) ----------
+    mqlSt(inst) { return (this.mql = this.mql || {})[inst.uid] || (this.mql[inst.uid] = {}); }
+    mqlKey(inst) { const n = this.candles.length; return [this.cfg.category, this.cfg.symbol, this.cfg.tf, inst.scriptId, inst.version || 0, JSON.stringify(inst.params), n ? this.candles[n - 1].time : 0].join('|'); }
+    async runMql(inst, force) {
+      const st = this.mqlSt(inst), key = this.mqlKey(inst);
+      if (st.busy || !this.candles.length || (!force && st.key === key) || (force && Date.now() - (st.at || 0) < 5000)) return;
+      st.busy = true; st.at = Date.now();
+      try {
+        const r = await call('POST', 'mql/run', null, { id: inst.scriptId, category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, inputs: inst.params, limit: 1500, version: inst.version });
+        st.res = r.ok ? r : st.res; st.err = r.ok ? null : r.error + (r.line ? ` (строка ${r.line})` : ''); st.logs = r.logs || [];
+      } catch (e) { st.err = e.message; }
+      st.key = key; st.busy = false;
+      if (this.main) this.refreshIndicators(true);
+    }
+    mqlItem(inst, full, paneIdx) {
+      const st = this.mqlSt(inst), res = st.res, sep = res && res.info.window === 'separate';
+      if (st.key !== this.mqlKey(inst)) this.runMql(inst, false);
+      if (!res) return null;
+      let it = this.ind.find((x) => x.inst === inst);
+      if (it && !full) return sep ? 'sep' : null;
+      const LC = LightweightCharts, pane = sep ? paneIdx + 1 : 0, times = res.times, n = times.length;
+      const step = n > 1 ? times[n - 1] - times[n - 2] : 3600, tm = (i) => (i < n ? times[i] : times[n - 1] + (i - n + 1) * step);
+      it = { inst, pane, series: {}, lv: [], out: null, mql: true, res }; this.ind.push(it);
+      res.plots.forEach((pl, k) => {
+        const base = { color: pl.color, lineWidth: Math.max(1, pl.width), priceLineVisible: false, lastValueVisible: !!sep, title: '', lineStyle: [0, 2, 1, 3, 3][pl.style] ?? 0 };
+        let s2;
+        if (pl.draw === 'hist') s2 = this.chart.addSeries(LC.HistogramSeries, { color: pl.color, priceLineVisible: false, lastValueVisible: false }, pane);
+        else if (pl.draw === 'arrow') s2 = this.chart.addSeries(LC.LineSeries, { ...base, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 3 }, pane);
+        else s2 = this.chart.addSeries(LC.LineSeries, base, pane);
+        const data = [];
+        for (let i = 0; i < n; i++) { const j = i + (pl.shift || 0); if (j < 0) continue; const v = pl.values[i]; if (v === null) { if (pl.draw !== 'section') data.push({ time: tm(j) }); } else data.push({ time: tm(j), value: v }); }
+        s2.setData(data); it.series['p' + k] = s2;
+        if (k === 0) {
+          (res.info.levels || []).forEach((lv) => s2.createPriceLine({ price: lv, color: '#7d8590', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: '' }));
+          if (sep && res.info.min !== null && res.info.max !== null) s2.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue: res.info.min, maxValue: res.info.max } }) });
+        }
+      });
+      return sep ? 'sep' : null;
+    }
     col(inst, o) { return (inst.style && inst.style.colors && inst.style.colors[o.k]) || o.color; }
     buildItem(it, def) {
       const LC = LightweightCharts, inst = it.inst; let firstS = null;
@@ -357,7 +399,14 @@
     }
     indLegend(time) {
       let html = '';
+      for (const inst of this.cfg.indicators.filter((x) => x.type === 'mql' && x.visible !== false)) {
+        const st = this.mqlSt(inst), it = this.ind.find((x) => x.inst === inst);
+        let vals = '';
+        if (it) { const idx = it.res.times.indexOf(time) >= 0 ? it.res.times.indexOf(time) : it.res.times.length - 1; vals = it.res.plots.map((pl) => { const v = pl.values[idx]; return v === null || v === undefined ? '' : `<span style="color:${pl.color}">${Math.abs(v) >= 100 ? v.toFixed(2) : v.toPrecision(5)}</span>`; }).join(' '); }
+        html += `<br><span style="color:var(--mut)">${inst.name}${it && it.res.info.short ? ' · ' + it.res.info.short : ''}</span> ${vals}${st.err ? ` <span class="dn">${String(st.err).replace(/</g, '&lt;')}</span>` : !it ? ' <span style="color:var(--mut)">…</span>' : ''}`;
+      }
       for (const it of this.ind) {
+        if (it.mql) continue;
         const def = PMTInd.REG[it.inst.type]; if (!it.out) continue;
         const idx = this.candles.findIndex((x) => x.time === time);
         const vals = def.outputs.filter((o) => o.type !== 'levels' && o.type !== 'markers' && !o.shift).map((o) => {
@@ -484,6 +533,102 @@
     });
   }
 
+
+  // ---------- MQL library dialog ----------
+  const MQL_TEMPLATE = `//+------------------------------------------------------------------+
+//| Моя скользящая средняя (MQL5)                                     |
+//+------------------------------------------------------------------+
+#property indicator_chart_window
+#property indicator_buffers 1
+#property indicator_plots   1
+#property indicator_type1   DRAW_LINE
+#property indicator_color1  clrOrange
+#property indicator_width1  2
+#property indicator_label1  "MyMA"
+
+input int Period_ = 20;
+
+double Buf[];
+
+int OnInit()
+{
+   SetIndexBuffer(0, Buf, INDICATOR_DATA);
+   return(INIT_SUCCEEDED);
+}
+
+int OnCalculate(const int rates_total, const int prev_calculated, const int begin, const double &price[])
+{
+   for(int i = Period_ - 1; i < rates_total; i++)
+   {
+      double sum = 0;
+      for(int j = 0; j < Period_; j++) sum += price[i - j];
+      Buf[i] = sum / Period_;
+   }
+   return(rates_total);
+}
+`;
+  let mqlSel = null, mqlInfo = null;
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const mqlMsg = (t, bad) => { const el = $('#mqlMsg'); el.textContent = t || ''; el.className = bad ? 'dn' : 'up'; };
+  async function mqlRefresh(selectId) {
+    const j = await call('GET', 'mql/scripts');
+    $('#mqlList').innerHTML = j.scripts.map((x) => `<div class="mrow${x.id === selectId ? ' sel' : ''}" data-id="${x.id}"><span>${esc(x.name)}</span><span class="badge${x.supported ? '' : ' bad'}">${x.lang}${x.supported ? '' : ' ✗'}</span></div>`).join('') || '<div style="color:var(--mut);padding:6px">Библиотека пуста. Загрузите .mq4/.mq5 или создайте индикатор.</div>';
+    if (selectId) await mqlSelect(selectId);
+  }
+  async function mqlSelect(id) {
+    mqlSel = await call('GET', 'mql/scripts/' + id); mqlInfo = null;
+    document.querySelectorAll('#mqlList .mrow').forEach((r) => r.classList.toggle('sel', +r.dataset.id === id));
+    $('#mqlEd').classList.remove('hidden'); $('#mqlLogs').classList.add('hidden');
+    $('#mqlName').value = mqlSel.name; $('#mqlVer').innerHTML = mqlSel.versions.map((v) => `<option value="${v.version}">v${v.version} · ${v.created_at}</option>`).join('');
+    $('#mqlSrc').value = mqlSel.supported ? mqlSel.source : '/* EX4/EX5 — скомпилированный бинарник. Хранится в библиотеке, но не исполняется:\n   исходный код недоступен, а запуск требует настоящего терминала MetaTrader (см. docs/MQL.md). */';
+    $('#mqlSrc').readOnly = !mqlSel.supported; $('#mqlSave').disabled = !mqlSel.supported; $('#mqlRun').disabled = !mqlSel.supported;
+    $('#mqlInputs').innerHTML = ''; if (mqlSel.supported) await mqlDescribe();
+  }
+  async function mqlDescribe() {
+    $('#mqlInputs').innerHTML = '<span style="color:var(--mut)">Разбор…</span>';
+    const d = await call('POST', `mql/scripts/${mqlSel.id}/describe`);
+    if (!d.ok) { mqlInfo = null; $('#mqlInputs').innerHTML = `<div class="dn">Ошибка: ${esc(d.error)}${d.line ? ` (строка ${d.line})` : ''}</div>`; return; }
+    mqlInfo = d.info;
+    $('#mqlInputs').innerHTML = `<div style="color:var(--mut)">${esc(d.info.lang.toUpperCase())} · окно: ${d.info.window === 'separate' ? 'отдельное' : 'основной график'}${d.info.description ? ' · ' + esc(d.info.description) : ''}${d.info.copyright ? ' · © ' + esc(d.info.copyright) : ''}</div>` +
+      (d.info.inputs.length ? d.info.inputs.map((q) => `<label>${esc(q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" data-in="${esc(q.name)}" data-k="${q.kind}" value="${esc(q.default)}"></label>`).join('') : '<span style="color:var(--mut)">Входных параметров нет.</span>');
+    (d.logs || []).length && ($('#mqlInputs').innerHTML += `<pre>${esc(d.logs.join('\n'))}</pre>`);
+  }
+  function wireMql() {
+    $('#btnMql').onclick = () => { $('#mqlDlg').classList.remove('hidden'); mqlRefresh(mqlSel && mqlSel.id).catch((e) => mqlMsg(e.message, true)); };
+    $('#mqlClose').onclick = () => $('#mqlDlg').classList.add('hidden');
+    $('#mqlDlg').onmousedown = (e) => { if (e.target.id === 'mqlDlg') $('#mqlDlg').classList.add('hidden'); };
+    $('#mqlList').onclick = (e) => { const r = e.target.closest('.mrow'); if (r) mqlSelect(+r.dataset.id).catch((x) => mqlMsg(x.message, true)); };
+    $('#mqlFile').onchange = async (e) => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      const ext = (f.name.split('.').pop() || '').toLowerCase(); if (!['mq4', 'mq5', 'ex4', 'ex5'].includes(ext)) { mqlMsg('Допустимы только .mq4 .mq5 .ex4 .ex5', true); return; }
+      if (f.size > 2097152) { mqlMsg('Файл слишком большой', true); return; }
+      try {
+        const buf = new Uint8Array(await f.arrayBuffer()); let body;
+        if (ext.startsWith('ex')) { let bin = ''; buf.forEach((b) => { bin += String.fromCharCode(b); }); body = { name: f.name, lang: ext, binary: btoa(bin) }; }
+        else { const le = buf[0] === 0xFF && buf[1] === 0xFE; body = { name: f.name.replace(/\.\w+$/, ''), lang: ext, source: new TextDecoder(le ? 'utf-16le' : 'utf-8').decode(buf) }; }
+        const j = await call('POST', 'mql/scripts', null, body); mqlMsg('Загружено: ' + f.name); await mqlRefresh(j.id);
+      } catch (x) { mqlMsg(x.message, true); }
+    };
+    $('#mqlNew').onclick = async () => { try { const j = await call('POST', 'mql/scripts', null, { name: 'Новый индикатор', lang: 'mq5', source: MQL_TEMPLATE }); await mqlRefresh(j.id); } catch (x) { mqlMsg(x.message, true); } };
+    $('#mqlSave').onclick = async () => {
+      try { await call('PUT', 'mql/scripts/' + mqlSel.id, null, { source: $('#mqlSrc').value, name: $('#mqlName').value }); mqlMsg('Сохранена новая версия'); await mqlRefresh(mqlSel.id); } catch (x) { mqlMsg(x.message, true); }
+    };
+    $('#mqlVer').onchange = async (e) => { const v = await call('GET', `mql/scripts/${mqlSel.id}/version`, { v: e.target.value }); $('#mqlSrc').value = v.source; mqlMsg(`Показана v${v.version}; «Сохранить версию» сделает её текущей`); };
+    $('#mqlDesc').onclick = () => mqlDescribe().catch((x) => mqlMsg(x.message, true));
+    $('#mqlDel').onclick = async () => { if (!confirm('Удалить скрипт и все версии?')) return; await call('DELETE', 'mql/scripts/' + mqlSel.id); mqlSel = null; $('#mqlEd').classList.add('hidden'); mqlRefresh(); };
+    $('#mqlLogsBtn').onclick = async () => {
+      const l = (await call('GET', `mql/scripts/${mqlSel.id}/logs`)).logs; const el = $('#mqlLogs'); el.classList.toggle('hidden');
+      el.textContent = l.map((x) => `[${x.created_at}] v${x.version} ${x.level.toUpperCase()} ${x.duration_ms ?? ''}ms\n${x.message}`).join('\n\n') || 'Запусков ещё не было';
+    };
+    $('#mqlRun').onclick = async () => {
+      if (!mqlInfo) await mqlDescribe(); if (!mqlInfo) { mqlMsg('Скрипт не компилируется — см. ошибку выше', true); return; }
+      const params = {}; document.querySelectorAll('#mqlInputs [data-in]').forEach((i) => { params[i.dataset.in] = i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
+      const p = panes[active];
+      p.cfg.indicators.push({ uid: Date.now() + '' + Math.floor(Math.random() * 1000), type: 'mql', scriptId: mqlSel.id, name: $('#mqlName').value || mqlSel.name, params, meta: { inputs: mqlInfo.inputs }, visible: true });
+      save(); p.refreshIndicators(true); mqlMsg('Добавлено на график: окно ' + (active + 1));
+    };
+  }
+
   // ---------- indicators dialog & templates ----------
   const tplAll = () => store.get('tpl', {});
   function renderInd() {
@@ -494,6 +639,10 @@
     $('#indAdd').innerHTML = Object.entries(cats).map(([c, l]) => `<optgroup label="${c}">${l.map((d) => `<option value="${d.id}">${d.name}</option>`).join('')}</optgroup>`).join('');
     const t = tplAll(); $('#tplSel').innerHTML = '<option value="">— шаблон —</option>' + Object.keys(t).map((k) => `<option>${k.replace(/</g, '&lt;')}</option>`).join('');
     $('#indList').innerHTML = p.cfg.indicators.map((inst) => {
+      if (inst.type === 'mql') {
+        const ps = (inst.meta && inst.meta.inputs || []).map((q) => `<label>${q.name} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" value="${String(inst.params[q.name] ?? q.default).replace(/"/g, '&quot;')}" data-u="${inst.uid}" data-mp="${q.name}" data-k="${q.kind}"></label>`).join('');
+        return `<div class="card"><div class="h"><input type="checkbox" data-u="${inst.uid}" data-vis ${inst.visible !== false ? 'checked' : ''}><span>MQL: ${inst.name}</span><span class="grow"></span><button data-u="${inst.uid}" data-del>Удалить</button></div><div>${ps}</div></div>`;
+      }
       const d = PMTInd.REG[inst.type];
       const ps = d.params.map((q) => q.type === 'select'
         ? `<label>${q.label} <select data-u="${inst.uid}" data-p="${q.k}">${q.options.map((o) => `<option${o === inst.params[q.k] ? ' selected' : ''}>${o}</option>`).join('')}</select></label>`
@@ -506,7 +655,8 @@
   function indEvent(e) {
     const el = e.target, u = el.dataset && el.dataset.u; if (!u) return;
     const p = panes[active], inst = p.cfg.indicators.find((x) => x.uid === u); if (!inst) return;
-    if (el.dataset.p) { const q = PMTInd.REG[inst.type].params.find((x) => x.k === el.dataset.p); inst.params[q.k] = q.type === 'select' ? el.value : Math.max(q.min || 0, parseFloat(el.value) || q.def); }
+    if (el.dataset.mp) { inst.params[el.dataset.mp] = el.dataset.k === 'string' ? el.value : parseFloat(el.value); }
+    else if (el.dataset.p) { const q = PMTInd.REG[inst.type].params.find((x) => x.k === el.dataset.p); inst.params[q.k] = q.type === 'select' ? el.value : Math.max(q.min || 0, parseFloat(el.value) || q.def); }
     else if (el.dataset.c !== undefined && el.dataset.c !== '') { (inst.style.colors = inst.style.colors || {})[el.dataset.c] = el.value; }
     else if ('w' in el.dataset) inst.style.width = Math.min(5, Math.max(1, parseInt(el.value, 10) || 1));
     else if ('vis' in el.dataset) inst.visible = el.checked;
@@ -538,7 +688,7 @@
   }
 
   function init() {
-    wireIndicators(); wireTools();
+    wireIndicators(); wireTools(); wireMql();
     $('#tfButtons').innerHTML = TFS.map(([v, l]) => `<button data-tf="${v}">${l}</button>`).join('');
     $('#tfButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ tf: b.dataset.tf }); };
     $('#typeButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ type: b.dataset.type }); };
