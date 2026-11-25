@@ -11,9 +11,10 @@ if (SECRET.length < 24) { console.error('MQL_SECRET (>=24 chars) is required'); 
 
 let running = 0; const queue = [];
 function runJob(body) {
+  const m = /^\{"timeoutS":(\d{1,2})[,}]/.exec(body.slice(0, 40)); const tmo = m ? Math.min(40, Math.max(5, +m[1])) : TIMEOUT_S; // strategy tests may need longer (hard-capped)
   return new Promise((resolve) => {
-    const args = ['--as=3500000000', '--cpu=10', '--nofile=64', '--fsize=0', '--core=0', '--nproc=64', '--',
-      'timeout', '-s', 'KILL', String(TIMEOUT_S), 'unshare', '-rn', process.execPath, '--max-old-space-size=300', path.join(__dirname, 'runner.js')];
+    const args = ['--as=3500000000', `--cpu=${tmo + 3}`, '--nofile=64', '--fsize=0', '--core=0', '--nproc=64', '--',
+      'timeout', '-s', 'KILL', String(tmo), 'unshare', '-rn', process.execPath, '--max-old-space-size=300', path.join(__dirname, 'runner.js')];
     const ch = spawn('prlimit', args, { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: '/usr/bin:/bin' } });
     let out = '', err = '', done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };

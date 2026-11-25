@@ -15,7 +15,7 @@ final class Scripts
     private const MAX_SRC = 262144;
     private const PERIOD_MIN = ['1' => 1, '3' => 3, '5' => 5, '15' => 15, '30' => 30, '60' => 60, '120' => 120, '240' => 240, '360' => 360, '720' => 720, 'D' => 1440, 'W' => 10080, 'M' => 43200];
 
-    private static function dir(int $uid, int $id): string
+    public static function dir(int $uid, int $id): string
     {
         $d = PMT_ROOT . "/storage/mql/$uid/$id";
         if (!is_dir($d) && !mkdir($d, 0750, true) && !is_dir($d)) {
@@ -58,7 +58,7 @@ final class Scripts
         }, $st->fetchAll());
     }
 
-    private static function row(int $uid, int $id): array
+    public static function row(int $uid, int $id): array
     {
         $st = Db::pdo()->prepare('SELECT * FROM custom_scripts WHERE id=? AND user_id=?');
         $st->execute([$id, $uid]);
@@ -156,12 +156,15 @@ final class Scripts
     }
 
     /** Calls the sandbox service. */
-    private static function exec(array $payload): array
+    public static function exec(array $payload, int $timeoutS = 0): array
     {
+        if ($timeoutS > 0) {
+            $payload = ['timeoutS' => $timeoutS] + $payload; // must be the first key: read by service.js
+        }
         $url = rtrim(Env::get('MQL_URL', 'http://127.0.0.1:18090'), '/') . '/run';
         $ch = curl_init($url);
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 25, CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeoutS > 0 ? $timeoutS + 15 : 25, CURLOPT_CONNECTTIMEOUT => 3,
             CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Secret: ' . Env::get('MQL_SECRET', '')],
             CURLOPT_POSTFIELDS => json_encode($payload),
         ]);

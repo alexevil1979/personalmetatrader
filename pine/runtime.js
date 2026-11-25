@@ -4,10 +4,12 @@ const { FN, IMPL, K } = require('./registry');
 const core = require('./lib_core');
 require('./lib_draw');
 require('./lib_array');
+require('./lib_strategy');
 const { trOf } = require('./lib_ta2');
 
 const DYN = ['syminfo.tickerid', 'syminfo.ticker', 'syminfo.mintick', 'syminfo.currency', 'syminfo.type', 'timeframe.period', 'timeframe.multiplier', 'timeframe.isintraday', 'timeframe.isdaily', 'timeframe.isweekly', 'timeframe.ismonthly',
-  'barstate.isconfirmed', 'barstate.islast', 'barstate.isfirst', 'barstate.ishistory', 'barstate.isrealtime', 'barstate.islastconfirmedhistory', 'last_bar_index', 'ta.tr', 'ta.obv', 'ta.vwap'];
+  'barstate.isconfirmed', 'barstate.islast', 'barstate.isfirst', 'barstate.ishistory', 'barstate.isrealtime', 'barstate.islastconfirmedhistory', 'last_bar_index', 'ta.tr', 'ta.obv', 'ta.vwap',
+  'strategy.position_size', 'strategy.position_avg_price', 'strategy.equity', 'strategy.netprofit', 'strategy.openprofit', 'strategy.closedtrades', 'strategy.opentrades', 'strategy.initial_capital', 'strategy.wintrades', 'strategy.losstrades', 'strategy.grossprofit', 'strategy.grossloss', 'strategy.max_drawdown'];
 const KNAMES = new Set([...Object.keys(K), ...DYN]);
 
 class Series {
@@ -37,7 +39,7 @@ function makeP(env) {
   const P = {
     env, C, n: 0, limit: 6e7, lim() { throw new Error('execution limit exceeded (too many loop iterations)'); },
     sites: [], userSeries: [], tmps: new Set(), inputs: [], ind: { title: 'Pine script', overlay: false, maxLabels: 50, maxLines: 50, maxBoxes: 50 },
-    out: { plots: {}, shapes: [], bg: [], hlines: [], labels: [], lines: [], boxes: [], tables: [] }, logs: [], timenow: Date.now(), k: Object.create(null), f: Object.create(null),
+    broker: null, out: { plots: {}, shapes: [], bg: [], hlines: [], labels: [], lines: [], boxes: [], tables: [] }, logs: [], timenow: Date.now(), k: Object.create(null), f: Object.create(null),
     site(id) { return this.sites[id] || (this.sites[id] = {}); },
     sv(isVar) { const s = new Series(C, isVar); this.userSeries.push(s); return s; },
     tmp(id, v) { const st = this.site(id); if (!st.s) st.s = new Series(C, false); st.s.cur = v; this.tmps.add(st.s); return st.s; },
@@ -76,6 +78,16 @@ function makeP(env) {
   def('timeframe.isintraday', () => env.periodMin < 1440); def('timeframe.isdaily', () => env.periodMin === 1440); def('timeframe.isweekly', () => env.periodMin === 10080); def('timeframe.ismonthly', () => env.periodMin >= 43200);
   def('barstate.isconfirmed', () => bs().confirmed); def('barstate.islast', () => C.i === n - 1); def('barstate.isfirst', () => C.i === 0);
   def('barstate.ishistory', () => bs().confirmed); def('barstate.isrealtime', () => !bs().confirmed); def('barstate.islastconfirmedhistory', () => (lastClosed ? C.i === n - 1 : C.i === n - 2)); def('last_bar_index', () => n - 1);
+  const B = () => P.broker;
+  const sdef = (name, f, dflt) => def(name, () => (B() ? f(B()) : dflt));
+  sdef('strategy.position_size', (b) => b.open.reduce((x, t) => x + t.dir * t.qty, 0), 0);
+  sdef('strategy.position_avg_price', (b) => { const q = b.open.reduce((x, t) => x + t.qty, 0); return q ? b.open.reduce((x, t) => x + t.price * t.qty, 0) / q : NaN; }, NaN);
+  sdef('strategy.equity', (b) => b.liveEquity(), 0); sdef('strategy.initial_capital', (b) => b.cfg.capital, 0);
+  sdef('strategy.netprofit', (b) => b.closed.reduce((x, t) => x + t.net, 0), 0); sdef('strategy.openprofit', (b) => b.liveOpenProfit(), 0);
+  sdef('strategy.closedtrades', (b) => b.closed.length, 0); sdef('strategy.opentrades', (b) => b.open.length, 0);
+  sdef('strategy.wintrades', (b) => b.closed.filter((t) => t.net > 0).length, 0); sdef('strategy.losstrades', (b) => b.closed.filter((t) => t.net < 0).length, 0);
+  sdef('strategy.grossprofit', (b) => b.closed.filter((t) => t.net > 0).reduce((x, t) => x + t.net, 0), 0); sdef('strategy.grossloss', (b) => -b.closed.filter((t) => t.net < 0).reduce((x, t) => x + t.net, 0), 0);
+  sdef('strategy.max_drawdown', (b) => b.maxDD, 0);
   const once = (state, fn) => () => { if (state.bar !== C.i) { state.bar = C.i; fn(state); } return state.v; };
   def('ta.tr', () => trOf(C));
   const obv = { v: 0 }; def('ta.obv', once(obv, (st) => { const ch = C.close.get(0) - C.close.get(1); if (!Number.isNaN(ch)) st.v += Math.sign(ch) * C.volume.cur; }));

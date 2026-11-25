@@ -103,9 +103,9 @@ console.log('OK semantics');
 
 // ---- 3) honest failures ----
 for (const [code, re] of [
-  ['//@version=5\nindicator("x")\nx = array.new_float(3)\n', /array\.new_float.*not supported/],
+  ['//@version=5\nindicator("x")\nimport user/lib/1 as l\n', /import.*not supported/],
   ['//@version=5\nindicator("x")\nx = foo + 1\n', /undeclared identifier 'foo'/],
-  ['//@version=5\nstrategy("x")\nstrategy.entry("l", strategy.long)\n', /not supported|undeclared/],
+  ['//@version=5\nlibrary("x")\n', /library\(\) scripts are not supported/],
   ['//@version=5\nindicator("x")\ny = request.security("BTCUSDT", "5", close)\nplot(y)\n', /no data for timeframe/],
   ['//@version=5\nindicator("x")\nx = 1 +\n', /unexpected/],
 ]) { let err = null; try { run(req(code)); } catch (e) { err = e; } assert.ok(err && re.test(err.message), code + ' -> ' + (err && err.message)); }

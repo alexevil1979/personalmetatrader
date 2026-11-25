@@ -10,6 +10,7 @@ use PMT\Core\Cache;
 use PMT\Core\Db;
 use PMT\Core\Log;
 use PMT\Mql\Scripts;
+use PMT\Mql\Tester;
 
 final class Api
 {
@@ -207,6 +208,33 @@ final class Api
     {
         $uid = (int) $user['id'];
         $pdo = Db::pdo();
+        if (str_starts_with($path, '/api/tester/')) {
+            try {
+                if ($path === '/api/tester/run' && $method === 'POST') {
+                    if (!Cache::rateLimit('tester:' . $uid, 20)) {
+                        self::out(['error' => 'rate limit'], 429);
+                        return;
+                    }
+                    self::out(Tester::run($uid, self::body(30000)));
+                } elseif ($path === '/api/tester/history' && $method === 'GET') {
+                    self::out(['tests' => Tester::history($uid)]);
+                } elseif (preg_match('#^/api/tester/(\d+)$#', $path, $m)) {
+                    if ($method === 'GET') {
+                        self::out(Tester::get($uid, (int) $m[1]));
+                    } elseif ($method === 'DELETE') {
+                        Tester::delete($uid, (int) $m[1]);
+                        self::out(['ok' => true]);
+                    } else {
+                        self::out(['error' => 'method'], 405);
+                    }
+                } else {
+                    self::out(['error' => 'not found'], 404);
+                }
+            } catch (\RuntimeException $e) {
+                self::out(['error' => $e->getMessage()], 503);
+            }
+            return;
+        }
         if (str_starts_with($path, '/api/mql/')) {
             self::mql($path, $method, $uid);
             return;

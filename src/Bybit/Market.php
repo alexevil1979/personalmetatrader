@@ -205,6 +205,25 @@ final class Market
         return $all;
     }
 
+    /** Candles within [fromSec, toSec] (ascending), at most $max, paged backwards via the cache-aware candles(). */
+    public static function candlesRange(string $category, string $symbol, string $tf, int $fromSec, int $toSec, int $max = 20000): array
+    {
+        $all = [];
+        $end = $toSec * 1000;
+        while (count($all) < $max) {
+            $chunk = self::candles($category, $symbol, $tf, $end, min(1000, $max - count($all)));
+            if (!$chunk) {
+                break;
+            }
+            $all = array_merge($chunk, $all);
+            $end = $chunk[0]['time'] * 1000 - 1;
+            if ($chunk[0]['time'] <= $fromSec || count($chunk) < 2) {
+                break;
+            }
+        }
+        return array_values(array_filter($all, static fn($c) => $c['time'] >= $fromSec && $c['time'] <= $toSec));
+    }
+
     private static function format(array $rows): array
     {
         return array_map(static fn($c) => [

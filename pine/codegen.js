@@ -176,8 +176,8 @@ function generate(src) {
       const t = pathOf(st.e.fn).slice(6), nm = st.e.named;
       meta.inputs.push({ name: st.name, title: lit(nm.title) ?? lit(st.e.args[1]) ?? st.name, type: t, kind: { int: 'int', float: 'double', bool: 'bool' }[t] || 'string', default: lit(nm.defval) ?? lit(st.e.args[0]), group: lit(nm.group), min: lit(nm.minval), max: lit(nm.maxval) });
     }
-    if (st.k === 'expr' && st.e.k === 'call' && pathOf(st.e.fn) === 'indicator') meta.indicator = { title: lit(st.e.args[0]) ?? lit(st.e.named.title), overlay: lit(st.e.named.overlay) === true };
-    if (st.k === 'expr' && st.e.k === 'call' && /^(strategy|library)$/.test(pathOf(st.e.fn) || '')) err(`${pathOf(st.e.fn)}() scripts are not supported (only indicator())`, st.line);
+    if (st.k === 'expr' && st.e.k === 'call' && /^(indicator|strategy)$/.test(pathOf(st.e.fn) || '')) { meta.indicator = { title: lit(st.e.args[0]) ?? lit(st.e.named.title), overlay: lit(st.e.named.overlay) === true }; if (pathOf(st.e.fn) === 'strategy') meta.isStrategy = true; }
+    if (st.k === 'expr' && st.e.k === 'call' && pathOf(st.e.fn) === 'library') err('library() scripts are not supported', st.line);
   }
   // functions first (hoisted), then main body
   let fnCode = '';
