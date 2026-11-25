@@ -47,10 +47,10 @@ function makeP(env) {
     tup(x, len) { if (!Array.isArray(x)) throw new Error('tuple assignment needs a tuple value'); return x.length >= len ? x : x.concat(new Array(len - x.length).fill(NaN)); },
     add(a, b) { return typeof a === 'string' || typeof b === 'string' ? `${a}${b}` : a + b; },
     hex(h) { return h; },
-    m(site, name, args) { // method-call syntax: a.push(x) / m.put(k, v)
-      const o = args[0], ns = Array.isArray(o) ? 'array' : o instanceof Map ? 'map' : null, f = ns && this.f[`${ns}.${name}`];
+    m(site, name, args, named) { // method-call syntax: a.push(x), m.put(k, v), tb.cell(...), ln.delete()
+      const o = args[0], ns = Array.isArray(o) ? 'array' : o instanceof Map ? 'map' : o && typeof o === 'object' ? o._k : null, f = ns && this.f[`${ns}.${name}`];
       if (!f) throw new Error(`method .${name}() is not available for this value`);
-      return f(site, args, {});
+      return f(site, args, named || {});
     },
     iter(x, withIdx) { if (!Array.isArray(x)) throw new Error('for ... in needs an array'); return withIdx ? x.map((v, i) => [i, v]) : x.slice(); },
     security(id, sym, tf, fn, look) {

@@ -8,6 +8,7 @@ reg('indicator', ['title', 'shorttitle', 'overlay', 'format', 'precision', 'scal
   P.ind = { title: g('title', 0) || 'Pine script', short: g('shorttitle', 1), overlay: !!g('overlay', 2), maxLabels: Math.min(500, g('max_labels_count', 11) || 50), maxLines: Math.min(500, g('max_lines_count', 10) || 50), maxBoxes: Math.min(500, g('max_boxes_count', 12) || 50) };
 });
 const colorOr = (x, d) => (typeof x === 'string' ? x : d);
+const tag = (o, k) => { Object.defineProperty(o, '_k', { value: k }); return o; };
 
 // ---------- plots ----------
 reg('plot', ['series', 'title', 'color', 'linewidth', 'style', 'trackprice', 'histbase', 'offset', 'join', 'editable', 'show_last', 'display'], {}, (P) => (s, a, n) => {
@@ -32,7 +33,7 @@ const limit = (P, list, max) => { const live = list.filter((o) => !o.deleted); f
 reg('label.new', ['x', 'y', 'text', 'xloc', 'yloc', 'color', 'style', 'textcolor', 'size', 'textalign', 'tooltip', 'text_font_family'], {}, (P) => (s, a, n) => {
   const g = (name, i) => (n[name] !== undefined ? n[name] : a[i]);
   const o = { id: P.out.labels.length, x: val(g('x', 0)), y: val(g('y', 1)), text: String(g('text', 2) ?? ''), xloc: g('xloc', 3) || 'bar_index', yloc: g('yloc', 4) || 'price', color: colorOr(g('color', 5), '#2962FF'), style: g('style', 6) || 'label_down', textcolor: colorOr(g('textcolor', 7), '#ffffff'), size: g('size', 8) || 'normal', bar: P.C.i, deleted: false };
-  P.out.labels.push(o); limit(P, P.out.labels, P.ind.maxLabels); return o;
+  tag(o, 'label'); P.out.labels.push(o); limit(P, P.out.labels, P.ind.maxLabels); return o;
 });
 const need = (o, w) => { if (!o || typeof o !== 'object') throw new Error(`${w}: label/line is na`); return o; };
 reg('label.delete', ['id'], {}, () => (s, a) => { if (a[0] && typeof a[0] === 'object') a[0].deleted = true; });
@@ -45,7 +46,7 @@ reg('label.set_color', ['id', 'color'], {}, () => (s, a) => { need(a[0], 'label.
 reg('line.new', ['x1', 'y1', 'x2', 'y2', 'xloc', 'extend', 'color', 'style', 'width'], {}, (P) => (s, a, n) => {
   const g = (name, i) => (n[name] !== undefined ? n[name] : a[i]);
   const o = { id: P.out.lines.length, x1: val(g('x1', 0)), y1: val(g('y1', 1)), x2: val(g('x2', 2)), y2: val(g('y2', 3)), xloc: g('xloc', 4) || 'bar_index', extend: g('extend', 5) || 'none', color: colorOr(g('color', 6), '#2962FF'), style: g('style', 7) || 'solid', width: g('width', 8) || 1, bar: P.C.i, deleted: false };
-  P.out.lines.push(o); limit(P, P.out.lines, P.ind.maxLines); return o;
+  tag(o, 'line'); P.out.lines.push(o); limit(P, P.out.lines, P.ind.maxLines); return o;
 });
 reg('line.delete', ['id'], {}, () => (s, a) => { if (a[0] && typeof a[0] === 'object') a[0].deleted = true; });
 reg('line.set_xy1', ['id', 'x', 'y'], {}, () => (s, a) => { const o = need(a[0], 'line.set_xy1'); o.x1 = a[1]; o.y1 = a[2]; });
@@ -58,7 +59,7 @@ reg('line.set_extend', ['id', 'e'], {}, () => (s, a) => { need(a[0], 'line.set_e
 reg('box.new', ['left', 'top', 'right', 'bottom', 'border_color', 'border_width', 'border_style', 'extend', 'xloc', 'bgcolor', 'text', 'text_size', 'text_color', 'text_halign', 'text_valign', 'text_wrap', 'text_font_family'], {}, (P) => (s, a, n) => {
   const g = (name, i) => (n[name] !== undefined ? n[name] : a[i]);
   const o = { id: P.out.boxes.length, left: val(g('left', 0)), top: val(g('top', 1)), right: val(g('right', 2)), bottom: val(g('bottom', 3)), border: colorOr(g('border_color', 4), '#2962FF'), borderWidth: g('border_width', 5) ?? 1, style: g('border_style', 6) || 'solid', extend: g('extend', 7) || 'none', xloc: g('xloc', 8) || 'bar_index', bgcolor: colorOr(g('bgcolor', 9), 'rgba(41,98,255,0.15)'), text: String(g('text', 10) ?? ''), textSize: g('text_size', 11) || 'normal', textColor: colorOr(g('text_color', 12), '#d1d4dc'), bar: P.C.i, deleted: false };
-  P.out.boxes.push(o); limit(P, P.out.boxes, P.ind.maxBoxes); return o;
+  tag(o, 'box'); P.out.boxes.push(o); limit(P, P.out.boxes, P.ind.maxBoxes); return o;
 });
 reg('box.delete', ['id'], {}, () => (s, a) => { if (a[0] && typeof a[0] === 'object') a[0].deleted = true; });
 for (const [nm, ks] of [['left', ['left']], ['right', ['right']], ['top', ['top']], ['bottom', ['bottom']], ['lefttop', ['left', 'top']], ['rightbottom', ['right', 'bottom']]]) {
@@ -71,7 +72,7 @@ reg('box.set_text', ['id', 'text'], {}, () => (s, a) => { need(a[0], 'box.set_te
 reg('table.new', ['position', 'columns', 'rows', 'bgcolor', 'frame_color', 'frame_width', 'border_color', 'border_width'], {}, (P) => (s, a, n) => {
   const g = (name, i) => (n[name] !== undefined ? n[name] : a[i]);
   const t = { id: P.out.tables.length, position: g('position', 0) || 'top_right', columns: g('columns', 1), rows: g('rows', 2), bgcolor: colorOr(g('bgcolor', 3), null), frame: colorOr(g('frame_color', 4), null), border: colorOr(g('border_color', 6), null), borderWidth: g('border_width', 7) || 0, cells: {}, deleted: false };
-  P.out.tables.push(t); return t;
+  tag(t, 'table'); P.out.tables.push(t); return t;
 });
 reg('table.cell', ['table_id', 'column', 'row', 'text', 'width', 'height', 'text_color', 'text_halign', 'text_valign', 'text_size', 'bgcolor', 'tooltip'], {}, () => (s, a, n) => {
   const g = (name, i) => (n[name] !== undefined ? n[name] : a[i]);

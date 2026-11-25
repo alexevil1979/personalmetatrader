@@ -76,7 +76,7 @@ function generate(src) {
     if (e.fn.k === 'mem') { // method syntax on a variable: a.push(x) -> array.push(a, x)
       let root = e.fn; while (root.k === 'mem') root = root.e;
       if (root.k === 'id' && (lookupLocal(root.name) || tops.has(root.name)) && !funcs.has(path)) {
-        return `P.m(${++sid},${q(e.fn.name)},[${[expr(e.fn.e), ...e.args.map(expr)].join(',')}])`;
+        return `P.m(${++sid},${q(e.fn.name)},[${[expr(e.fn.e), ...e.args.map(expr)].join(',')}],{${Object.entries(e.named).map(([k, v]) => `${q(k)}:${expr(v)}`).join(',')}})`;
       }
     }
     const nparams = (a) => a;
@@ -116,7 +116,7 @@ function generate(src) {
   }
   const tick = 'if(++P.n>P.limit)P.lim();';
   function declValue(s) {
-    const isInput = s.e.k === 'call' && (pathOf(s.e.fn) || '').startsWith('input.');
+    const isInput = s.e.k === 'call' && ((pathOf(s.e.fn) || '').startsWith('input.') || pathOf(s.e.fn) === 'input');
     if (isInput) { s.e.named.__name = { k: 'str', v: s.name }; }
     return expr(s.e);
   }
@@ -172,8 +172,9 @@ function generate(src) {
   const lit = (n) => (!n ? undefined : n.k === 'num' || n.k === 'str' || n.k === 'bool' ? n.v : n.k === 'neg' && n.e.k === 'num' ? -n.e.v : n.k === 'color' ? n.v : undefined);
   meta.inputs = [];
   for (const st of ast.body) {
-    if (st.k === 'decl' && st.e.k === 'call' && (pathOf(st.e.fn) || '').startsWith('input.')) {
-      const t = pathOf(st.e.fn).slice(6), nm = st.e.named;
+    if (st.k === 'decl' && st.e.k === 'call' && ((pathOf(st.e.fn) || '').startsWith('input.') || pathOf(st.e.fn) === 'input')) {
+      const d0 = st.e.args[0], t = pathOf(st.e.fn) === 'input' ? (d0 && d0.k === 'bool' ? 'bool' : d0 && d0.k === 'num' ? 'float' : d0 && d0.k === 'str' ? 'string' : 'source') : pathOf(st.e.fn).slice(6), nm = st.e.named;
+      if (t === 'source' || t === 'color') continue; // not editable in the form (no literal default)
       meta.inputs.push({ name: st.name, title: lit(nm.title) ?? lit(st.e.args[1]) ?? st.name, type: t, kind: { int: 'int', float: 'double', bool: 'bool' }[t] || 'string', default: lit(nm.defval) ?? lit(st.e.args[0]), group: lit(nm.group), min: lit(nm.minval), max: lit(nm.maxval) });
     }
     if (st.k === 'expr' && st.e.k === 'call' && /^(indicator|strategy)$/.test(pathOf(st.e.fn) || '')) { meta.indicator = { title: lit(st.e.args[0]) ?? lit(st.e.named.title), overlay: lit(st.e.named.overlay) === true }; if (pathOf(st.e.fn) === 'strategy') meta.isStrategy = true; }

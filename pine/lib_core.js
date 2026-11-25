@@ -136,7 +136,7 @@ const inp = (kind, conv) => reg(`input.${kind}`, ['defval', 'title', 'tooltip', 
 inp('int', (v) => Math.trunc(Number(v))); inp('float', Number); inp('bool', (v) => v === true || v === 'true' || v === 1); inp('string', String); inp('color', String);
 inp('timeframe', String); inp('symbol', String); inp('price', Number);
 reg('input.source', ['defval', 'title'], {}, () => (s, a) => a[0]);
-reg('input', ['defval', 'title'], {}, () => (s, a) => a[0]);
+reg('input', ['defval', 'title', 'tooltip', 'inline', 'group', '__name'], {}, (P) => (s, a, n) => { const nm = n.__name; const v = a[0]; if (nm && P.env.inputs && nm in P.env.inputs && (typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string')) { const o = P.env.inputs[nm]; return typeof v === 'boolean' ? (o === true || o === 'true') : typeof v === 'number' ? Number(o) : String(o); } return v; });
 
 reg('request.security', ['symbol', 'timeframe', 'expression', 'gaps', 'lookahead'], {}, () => () => undefined); // compiled specially (P.security)
 // ---------- misc no-ops ----------
