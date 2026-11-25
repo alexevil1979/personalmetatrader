@@ -5,7 +5,7 @@ Stack: PHP 8.3+, MySQL 8, Apache 2.4, Redis, vanilla JS + TradingView Lightweigh
 
 Live: https://pmt.1tlt.ru (also :18088 on the LAN).
 
-Status: **Stages 1-4 done** (infra; terminal UI, Bybit REST + WebSocket, candle cache; 33 indicators; 14 drawing tools). See [docs/AUDIT.md](docs/AUDIT.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Status: **Stages 1-4 + auth/DB done** (infra; terminal UI, Bybit REST + WebSocket, candle cache; 33 indicators; 14 drawing tools). See [docs/AUDIT.md](docs/AUDIT.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Install
 ```bash
@@ -39,3 +39,10 @@ Secrets live only in `.env` (git-ignored). Prepared statements everywhere; API k
 ## Stage 4 notes (drawing tools)
 - `public/assets/drawings.js`: 14 tools (H/V line, trend, ray, channel, rectangle, Fib retracement/extension/fan/time zones, pitchfork, text, arrow, price label). Objects are stored as time/price points (not pixels), drawn by a series primitive, so they stay put on zoom/scroll/timeframe change. Click-to-place with live preview, select, drag whole object or handles, color/width, Delete key, Esc to cancel, dbl-click to edit text. `node tests/drawings.test.js` checks the geometry.
 - Persistence is per symbol in browser localStorage (shared by all windows showing the symbol) until user accounts/MySQL (`chart_objects`) are wired in.
+
+## Auth & storage
+- Everything except `/api/health` and `/api/auth/*` requires a login. Sessions: PHP sessions (HttpOnly, SameSite=Lax, Secure on HTTPS, id regenerated on login); CSRF token in `X-CSRF-Token` for every non-GET request plus Origin check; argon2id passwords (min 10 chars); per-IP and per-email rate limits on auth.
+- Registration: the **first** registered user becomes admin, afterwards registration is closed unless `REGISTRATION=open` in `.env`. Admin CLI: `sudo -u pmt php bin/user.php create|reset-link|list|deactivate`.
+- Password reset: the VPS has no mail server, so the reset link is issued by an admin: `php bin/user.php reset-link EMAIL` -> open `/?reset=TOKEN` (valid 1 hour, token stored hashed).
+- Stored in MySQL per user: settings blob (`user_settings`: layout, panes, indicators, theme), templates (`chart_templates`), drawing objects (`chart_objects`), watchlists (`watchlists`/`watchlist_symbols`), auth events (`system_logs`). Browser localStorage stays as an offline cache and is wiped on logout. Existing local data is uploaded once on first login.
+- Not wired yet: `chart_layouts` (layouts live inside the settings blob), `indicator_instances`/`indicators` (instances live inside the settings blob), `exchange_credentials` UI.
