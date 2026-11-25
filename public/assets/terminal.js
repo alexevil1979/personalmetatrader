@@ -94,11 +94,12 @@
   // ---------- Chart pane ----------
   class Pane {
     constructor(host, cfg) {
-      this.cfg = cfg; this.dw = new PMTDraw.Drawings(this, drawHooks); if (!cfg.indicators) cfg.indicators = []; this.ind = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
+      this.cfg = cfg; if (!cfg.indicators) cfg.indicators = []; this.ind = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
       this.el = document.createElement('div'); this.el.className = 'pane';
       this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div>';
       host.appendChild(this.el);
       this.cv = this.el.querySelector('.cv'); this.legend = this.el.querySelector('.ohlc'); this.loadEl = this.el.querySelector('.load');
+      this.dw = new PMTDraw.Drawings(this, drawHooks);
       this.chart = LightweightCharts.createChart(this.cv, { autoSize: true, crosshair: { mode: 0 }, timeScale: { timeVisible: true, rightOffset: 8 } });
       this.onReopen = () => this.refreshLatest();
       this.onMsg = (m) => this.live(m);
