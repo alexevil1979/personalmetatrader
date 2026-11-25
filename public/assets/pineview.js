@@ -33,13 +33,13 @@
       while (lo < hi) { const m = (lo + hi + 1) >> 1; if (c[m].time <= time) lo = m; else hi = m - 1; }
       return c[lo];
     }
-    X(res, i) { return this.pane.chart.timeScale().logicalToCoordinate(this.pane.dw.tToL(this.barTime(res, i))); }
-    Xt(ms) { return this.pane.chart.timeScale().logicalToCoordinate(this.pane.dw.tToL(ms / 1000)); }
+    X(res, i) { return this.pane.chart.timeScale().logicalToCoordinate(this.pane.dw.tToL(this.barTime(res, i)) + this.off); }
+    Xt(ms) { return this.pane.chart.timeScale().logicalToCoordinate(this.pane.dw.tToL(ms / 1000) + this.off); }
     Y(p) { return this.series.priceToCoordinate(p); }
 
     draw(ctx, mediaSize, bottom) {
       try { const ps = this.pane.chart.paneSize(); this.size = { W: ps.width, H: ps.height }; } catch { this.size = { W: mediaSize.width, H: mediaSize.height }; }
-      const { W, H } = this.size; ctx.save();
+      const { W, H } = this.size; this.off = this.pane.dw.off(); ctx.save();
       for (const res of this.items.values()) {
         if (bottom) { this.drawBg(ctx, res, W, H); continue; }
         this.drawHlines(ctx, res, W);

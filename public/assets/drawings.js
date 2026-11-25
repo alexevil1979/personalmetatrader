@@ -111,6 +111,13 @@
 
     // --- coordinate conversion (time <-> logical index, beyond data range too) ---
     step() { const c = this.pane.candles, n = c.length; return n > 1 ? c[n - 1].time - c[n - 2].time : 3600; }
+    // LWC logical indices are shared by ALL series of the chart (indicators may reach further back than the loaded candles),
+    // so candle-index space and chart-logical space differ by a constant offset on the common bar grid.
+    off() {
+      const c = this.pane.candles, n = c.length; if (!n) return 0;
+      const i = this.pane.chart.timeScale().timeToIndex(c[n - 1].time, true);
+      return i === null || i === undefined ? 0 : i - (n - 1);
+    }
     tToL(t) {
       const c = this.pane.candles, n = c.length; if (!n) return 0;
       if (t >= c[n - 1].time) return n - 1 + (t - c[n - 1].time) / this.step();
@@ -125,12 +132,12 @@
       const i = Math.floor(l); return c[i].time + (l - i) * (c[i + 1].time - c[i].time);
     }
     env() {
-      const ts = this.pane.chart.timeScale(), s = this.series, sz = this.size || { W: 800, H: 400 };
-      return { W: sz.W, H: sz.H, prec: this.pane.precision(), X: (t) => ts.logicalToCoordinate(this.tToL(t)), Y: (p) => s.priceToCoordinate(p) };
+      const ts = this.pane.chart.timeScale(), s = this.series, sz = this.size || { W: 800, H: 400 }, off = this.off();
+      return { W: sz.W, H: sz.H, prec: this.pane.precision(), X: (t) => ts.logicalToCoordinate(this.tToL(t) + off), Y: (p) => s.priceToCoordinate(p) };
     }
     pt(e, snap) {
       const r = this.pane.cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
-      let l = this.pane.chart.timeScale().coordinateToLogical(x); if (l === null) return null;
+      let l = this.pane.chart.timeScale().coordinateToLogical(x); if (l === null) return null; l -= this.off();
       if (snap) l = Math.round(l);
       const p = this.series.coordinateToPrice(y); if (p === null) return null;
       return { x, y, l, p, t: this.lToT(l) };
