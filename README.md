@@ -5,7 +5,7 @@ Stack: PHP 8.3+, MySQL 8, Apache 2.4, Redis, vanilla JS + TradingView Lightweigh
 
 Live: https://pmt.1tlt.ru (also :18088 on the LAN).
 
-Status: **Stages 1-4 + auth/DB done** (infra; terminal UI, Bybit REST + WebSocket, candle cache; 33 indicators; 14 drawing tools). See [docs/AUDIT.md](docs/AUDIT.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Status: **Stages 1-5 + auth/DB done** (infra; terminal UI, Bybit REST + WebSocket, candle cache; 33 indicators; 14 drawing tools). See [docs/AUDIT.md](docs/AUDIT.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Install
 ```bash
@@ -46,3 +46,6 @@ Secrets live only in `.env` (git-ignored). Prepared statements everywhere; API k
 - Password reset: the VPS has no mail server, so the reset link is issued by an admin: `php bin/user.php reset-link EMAIL` -> open `/?reset=TOKEN` (valid 1 hour, token stored hashed).
 - Stored in MySQL per user: settings blob (`user_settings`: layout, panes, indicators, theme), templates (`chart_templates`), drawing objects (`chart_objects`), watchlists (`watchlists`/`watchlist_symbols`), auth events (`system_logs`). Browser localStorage stays as an offline cache and is wiped on logout. Existing local data is uploaded once on first login.
 - Not wired yet: `chart_layouts` (layouts live inside the settings blob), `indicator_instances`/`indicators` (instances live inside the settings blob), `exchange_credentials` UI.
+
+## Stage 5 notes (MQL)
+MQL4/MQL5 indicators are executed by an own compiler/runtime in a sandbox (separate OS user, no network, rlimits). EX4/EX5 are stored but not executed. See [docs/MQL.md](docs/MQL.md) for architecture, the honest list of supported functions, limits and tests (`node tests/mql.test.js`). Deploy/update the sandbox with `sh deploy/install-mql.sh`.
