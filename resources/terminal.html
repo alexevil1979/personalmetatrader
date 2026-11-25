@@ -39,6 +39,7 @@
   <button id="btnInd" title="Индикаторы">ƒ Индикаторы</button>
   <button id="togWatch" class="on" title="Обзор рынка">Обзор</button>
   <button id="togInfo" class="on" title="Нижняя панель">Инфо</button>
+  <span id="userBox" class="hidden"><span id="userEmail"></span> <button id="btnLogout" title="Выйти">Выйти</button></span>
   <span id="conn" class="dot off" title="WebSocket"></span>
 </header>
 
@@ -63,6 +64,14 @@
   <div class="dlgrow"><select id="indAdd"></select><button id="indAddBtn">Добавить</button>
     <span class="grow"></span><select id="tplSel"></select><button id="tplApply">Применить</button><button id="tplSave">Сохранить шаблон</button><button id="tplDel">Удалить</button></div>
   <div id="indList"></div>
+</div></div>
+
+<div id="authDlg" class="dlg"><div class="dlgbox authbox">
+  <div class="dlghead"><b id="authTitle">Вход</b></div>
+  <input id="authEmail" type="email" placeholder="Email" autocomplete="username">
+  <input id="authPass" type="password" placeholder="Пароль" autocomplete="current-password">
+  <button id="authGo" class="on">Войти</button>
+  <div id="authLinks"></div><div id="authMsg"></div>
 </div></div>
 
 <script src="/assets/vendor/lightweight-charts.js"></script>

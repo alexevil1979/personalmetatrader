@@ -7,21 +7,107 @@
   const $ = (s) => document.querySelector(s);
   const store = {
     get(k, d) { try { const v = localStorage.getItem('pmt.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-    set(k, v) { try { localStorage.setItem('pmt.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
+    set(k, v) { try { localStorage.setItem('pmt.' + k, JSON.stringify(v)); } catch { /* ignore */ } if (window.PMTSync) PMTSync.out(k, v); },
+    setLocal(k, v) { try { localStorage.setItem('pmt.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
   };
 
-  const state = Object.assign({ category: 'linear', theme: 'dark', tz: 'UTC', layout: 1, sync: false, watch: {}, showWatch: true, showInfo: true, panes: [] }, store.get('state', {}));
+  const state = Object.assign({ category: 'linear', theme: 'dark', tz: 'UTC', layout: 1, sync: false, watch: {}, showWatch: true, showInfo: true, panes: [] }, {});
   const save = () => store.set('state', { ...state, panes: panes.map((p) => p.cfg) });
 
   let symbolsByCat = {};
   let panes = [];
   let active = 0;
 
-  async function api(path, params) {
-    const r = await fetch('/api/' + path + '?' + new URLSearchParams(params));
+  let csrf = '', authed = false;
+  async function call(method, path, params, body) {
+    const opt = { method, headers: { 'X-CSRF-Token': csrf }, credentials: 'same-origin' };
+    if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+    const r = await fetch('/api/' + path + (params ? '?' + new URLSearchParams(params) : ''), opt);
     const j = await r.json().catch(() => ({}));
+    if (r.status === 401 && !path.startsWith('auth/')) { authed = false; showAuth('login'); throw new Error('unauthorized'); }
     if (!r.ok) throw new Error(j.error || r.status);
     return j;
+  }
+  const api = (path, params) => call('GET', path, params);
+
+  // ---------- server sync (debounced) ----------
+  const pend = {}, lastWL = {}; let syncTimer = null;
+  function queue(k, v) { pend[k] = v; clearTimeout(syncTimer); syncTimer = setTimeout(flush, 1200); }
+  async function flush() {
+    for (const k of Object.keys(pend)) {
+      const v = pend[k]; delete pend[k];
+      try {
+        if (k === 'state') { await call('PUT', 'state', null, v); for (const cat of Object.keys(v.watch || {})) { const j = JSON.stringify(v.watch[cat]); if (lastWL[cat] !== j) { await call('PUT', 'watchlist', { category: cat }, { symbols: v.watch[cat] }); lastWL[cat] = j; } } }
+        else if (k === 'tpl') await call('PUT', 'templates', null, v);
+        else { const [cat, sym] = k.slice(4).split(':'); await call('PUT', 'objects', { category: cat, symbol: sym }, { objects: v }); }
+      } catch (e) { if (!(k in pend)) pend[k] = v; }
+    }
+  }
+  window.PMTSync = {
+    out(k, v) { if (authed && (k === 'state' || k === 'tpl')) queue(k, v); },
+    obj(key, arr) { if (authed) queue('obj:' + key, arr); },
+    async fetchObj(key, apply, local) {
+      if (!authed) return;
+      try {
+        const [cat, sym] = key.split(':'), j = await call('GET', 'objects', { category: cat, symbol: sym });
+        if (j.objects.length || !local.length) apply(j.objects); else queue('obj:' + key, local); // migrate local objects once
+      } catch { /* offline: keep local cache */ }
+    },
+  };
+  window.addEventListener('beforeunload', () => { for (const k of Object.keys(pend)) { /* best effort flush */ try { const v = pend[k]; const [cat, sym] = k.startsWith('obj:') ? k.slice(4).split(':') : []; const url = k === 'state' ? '/api/state' : k === 'tpl' ? '/api/templates' : `/api/objects?category=${cat}&symbol=${sym}`; fetch(url, { method: 'PUT', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(k.startsWith('obj:') ? { objects: v } : v) }); } catch { /* ignore */ } } });
+
+  // ---------- auth UI ----------
+  let authMode = 'login', resetToken = null;
+  function showAuth(mode, token, regOpen) {
+    authMode = mode || 'login'; if (token) resetToken = token; if (regOpen !== undefined) showAuth.reg = regOpen;
+    $('#authDlg').classList.remove('hidden');
+    const t = { login: 'Вход', register: 'Регистрация', forgot: 'Восстановление пароля', reset: 'Новый пароль' }[authMode];
+    $('#authTitle').textContent = t;
+    $('#authEmail').classList.toggle('hidden', authMode === 'reset');
+    $('#authPass').classList.toggle('hidden', authMode === 'forgot');
+    $('#authPass').placeholder = authMode === 'reset' ? 'Новый пароль (от 10 символов)' : 'Пароль' + (authMode === 'register' ? ' (от 10 символов)' : '');
+    $('#authGo').textContent = { login: 'Войти', register: 'Создать аккаунт', forgot: 'Отправить запрос', reset: 'Сменить пароль' }[authMode];
+    $('#authLinks').innerHTML = (authMode !== 'login' ? '<a data-m="login">Вход</a>' : '') + (authMode === 'login' && showAuth.reg ? '<a data-m="register">Регистрация</a>' : '') + (authMode === 'login' ? '<a data-m="forgot">Забыли пароль?</a>' : '');
+    $('#authMsg').textContent = '';
+  }
+  async function authSubmit() {
+    const email = $('#authEmail').value.trim(), password = $('#authPass').value, msg = $('#authMsg');
+    try {
+      if (authMode === 'forgot') { const j = await call('POST', 'auth/reset-request', null, { email }); msg.textContent = j.message; return; }
+      if (authMode === 'reset') { await call('POST', 'auth/reset', null, { token: resetToken, password }); history.replaceState(null, '', '/'); showAuth('login'); $('#authMsg').textContent = 'Пароль изменён, войдите.'; return; }
+      const j = await call('POST', authMode === 'register' ? 'auth/register' : 'auth/login', null, { email, password });
+      csrf = j.csrf; $('#authPass').value = ''; await startApp(j.user);
+    } catch (e) { msg.textContent = e.message; }
+  }
+  async function logout() {
+    try { await call('POST', 'auth/logout'); } catch { /* ignore */ }
+    Object.keys(localStorage).filter((k) => k.startsWith('pmt.')).forEach((k) => localStorage.removeItem(k)); // no data leaks to the next user
+    location.reload();
+  }
+  let started = false;
+  async function startApp(user) {
+    authed = true; $('#authDlg').classList.add('hidden'); $('#userEmail').textContent = user.email; $('#userBox').classList.remove('hidden');
+    if (started) return; started = true;
+    const st = (await call('GET', 'state')).state;
+    Object.assign(state, st || store.get('state', {}));
+    try { // templates: server wins, local is migrated once
+      const t = (await call('GET', 'templates')).templates;
+      if (Object.keys(t).length) store.setLocal('tpl', t); else if (Object.keys(store.get('tpl', {})).length) queue('tpl', store.get('tpl', {}));
+    } catch { /* keep local */ }
+    for (const cat of ['linear', 'spot', 'inverse']) { try { const w = (await call('GET', 'watchlist', { category: cat })).symbols; if (w && w.length) { state.watch[cat] = w; lastWL[cat] = JSON.stringify(w); } } catch { /* keep local */ } }
+    init();
+  }
+  async function boot() {
+    $('#authGo').onclick = authSubmit;
+    $('#authPass').onkeydown = $('#authEmail').onkeydown = (e) => { if (e.key === 'Enter') authSubmit(); };
+    $('#authLinks').onclick = (e) => { if (e.target.dataset.m) showAuth(e.target.dataset.m); };
+    $('#btnLogout').onclick = logout;
+    const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((r) => r.json());
+    csrf = me.csrf; showAuth.reg = me.registration;
+    const reset = new URLSearchParams(location.search).get('reset');
+    if (reset) { showAuth('reset', reset); return; }
+    if (!me.user) { showAuth(me.registration && me.firstUser ? 'register' : 'login'); return; }
+    await startApp(me.user);
   }
 
   async function loadSymbols(cat) {
@@ -489,5 +575,5 @@
       window.addEventListener('beforeunload', save);
     });
   }
-  init();
+  boot();
 })();

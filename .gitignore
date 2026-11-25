@@ -6,6 +6,7 @@
 /storage/cache/*
 /storage/uploads/*
 /storage/mql/*
+/storage/sessions/*
 !/storage/*/.gitkeep
 *.log
 *.key
