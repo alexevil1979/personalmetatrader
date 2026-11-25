@@ -94,7 +94,7 @@
   // ---------- Chart pane ----------
   class Pane {
     constructor(host, cfg) {
-      this.cfg = cfg; if (!cfg.indicators) cfg.indicators = []; this.ind = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
+      this.cfg = cfg; this.dw = new PMTDraw.Drawings(this, drawHooks); if (!cfg.indicators) cfg.indicators = []; this.ind = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
       this.el = document.createElement('div'); this.el.className = 'pane';
       this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div>';
       host.appendChild(this.el);
@@ -132,6 +132,7 @@
       if (ty === 'line') this.main = this.chart.addSeries(LC.LineSeries, { color: '#2962ff', lineWidth: 2, priceFormat: pf });
       else if (ty === 'bars') this.main = this.chart.addSeries(LC.BarSeries, { upColor: t.up, downColor: t.dn, priceFormat: pf });
       else this.main = this.chart.addSeries(LC.CandlestickSeries, { upColor: t.up, downColor: t.dn, borderUpColor: t.up, borderDownColor: t.dn, wickUpColor: t.up, wickDownColor: t.dn, priceFormat: pf });
+      this.dw.attach();
       this.vol = this.chart.addSeries(LC.HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' }, 0);
       this.vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       this.render();
@@ -144,7 +145,7 @@
     volData(c) { const t = chartTheme(); return c.map((k) => ({ time: k.time, value: k.volume, color: (k.close >= k.open ? t.up : t.dn) + '66' })); }
     render() { this.main.setData(this.series(this.candles)); this.vol.setData(this.volData(this.candles)); this.refreshIndicators(true); }
     async load() {
-      this.unsubscribe(); this.candles = []; this.exhausted = false; this.loadEl.textContent = 'загрузка…';
+      this.unsubscribe(); this.dw.setKey(this.cfg.category + ':' + this.cfg.symbol); this.candles = []; this.exhausted = false; this.loadEl.textContent = 'загрузка…';
       const token = this.token = (this.token || 0) + 1;
       try {
         const d = await api('candles', { category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, limit: PAGE });
@@ -286,7 +287,8 @@
     }
     changeInd() { this.refreshIndicators(true); this.cross(null); }
     set(patch) { Object.assign(this.cfg, patch); }
-    destroy() { this.unsubscribe(); this.chart.remove(); this.el.remove(); }
+    precision() { const i = symInfo(this.cfg.category, this.cfg.symbol); return i ? +i.scale : 2; }
+    destroy() { this.dw.destroy(); this.unsubscribe(); this.chart.remove(); this.el.remove(); }
   }
 
   // ---------- UI wiring ----------
@@ -298,7 +300,7 @@
     $('#symbolInput').value = c.symbol;
     document.querySelectorAll('#tfButtons button').forEach((b) => b.classList.toggle('on', b.dataset.tf === c.tf));
     document.querySelectorAll('#typeButtons button').forEach((b) => b.classList.toggle('on', b.dataset.type === c.type));
-    fillDatalist(c.category); renderWatch(); updateInfo();
+    fillDatalist(c.category); renderWatch(); updateInfo(); updateObjBar();
   }
 
   async function fillDatalist(cat) {
@@ -360,6 +362,41 @@
   }
 
 
+
+  // ---------- drawing tools wiring ----------
+  let tool = 'cursor';
+  const drawHooks = {
+    tool: () => tool,
+    defColor: () => '#2962ff',
+    activate: (p) => { const i = panes.indexOf(p); if (i >= 0 && i !== active) setActive(i); },
+    toolDone: () => setTool('cursor'),
+    onSel: (dw) => { if (panes[active] && panes[active].dw === dw) updateObjBar(); },
+  };
+  function setTool(t) {
+    tool = t; document.querySelectorAll('#tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
+    panes.forEach((p) => { if (t === 'cursor') p.dw.creating = null; p.cv.style.cursor = t === 'cursor' ? '' : 'crosshair'; p.dw.request(); });
+  }
+  function updateObjBar() {
+    const o = panes[active] && panes[active].dw.selected(), bar = $('#objBar');
+    bar.classList.toggle('hidden', !o);
+    if (o) { $('#objName').textContent = PMTDraw.NAMES[o.type]; $('#objColor').value = PMTDraw.colorOf(o); $('#objWidth').value = o.style.width || 1; }
+  }
+  function wireTools() {
+    const G = { hline: '─', vline: '│', trend: '╱', ray: '↗', channel: '▱', rect: '▭', fibret: 'Fib', fibext: 'FbE', fibfan: 'Fan', fibtime: 'FbT', pitchfork: 'Ψ', text: 'T', arrow: '➚', pricelabel: '$' };
+    $('#tools').innerHTML = [['cursor', '⌖', 'Курсор / выбор'], ...Object.entries(PMTDraw.NAMES).map(([k, n]) => [k, G[k], n])]
+      .map(([k, g, n]) => `<button data-tool="${k}" title="${n}"${k === 'cursor' ? ' class="on"' : ''}>${g}</button>`).join('');
+    $('#tools').onclick = (e) => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); };
+    $('#objColor').oninput = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.color = e.target.value; panes[active].dw.save(); panes[active].dw.request(); } };
+    $('#objWidth').onchange = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.width = Math.min(6, Math.max(1, +e.target.value || 1)); panes[active].dw.save(); panes[active].dw.request(); } };
+    $('#objDel').onclick = () => { panes[active].dw.remove(); };
+    $('#objClear').onclick = () => { if (confirm('Удалить все объекты на этом символе?')) panes[active].dw.clearAll(); };
+    window.addEventListener('keydown', (e) => {
+      if (/INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''))) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') panes[active].dw.remove();
+      else if (e.key === 'Escape') { panes[active].dw.cancel(); setTool('cursor'); }
+    });
+  }
+
   // ---------- indicators dialog & templates ----------
   const tplAll = () => store.get('tpl', {});
   function renderInd() {
@@ -414,7 +451,7 @@
   }
 
   function init() {
-    wireIndicators();
+    wireIndicators(); wireTools();
     $('#tfButtons').innerHTML = TFS.map(([v, l]) => `<button data-tf="${v}">${l}</button>`).join('');
     $('#tfButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ tf: b.dataset.tf }); };
     $('#typeButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ type: b.dataset.type }); };

@@ -48,6 +48,9 @@
     <input id="watchFilter" placeholder="Фильтр">
     <div id="watchList"></div>
   </aside>
+  <aside id="toolsWrap"><div id="tools"></div>
+    <div id="objBar" class="hidden"><div id="objName"></div><input type="color" id="objColor" title="Цвет"><input type="number" id="objWidth" min="1" max="6" title="Толщина"><button id="objDel">Удалить</button></div>
+    <button id="objClear" title="Удалить все объекты">Очистить</button></aside>
   <section id="charts"></section>
 </main>
 
@@ -64,6 +67,7 @@
 
 <script src="/assets/vendor/lightweight-charts.js"></script>
 <script src="/assets/indicators.js"></script>
+<script src="/assets/drawings.js"></script>
 <script src="/assets/terminal.js"></script>
 </body>
 </html>
