@@ -644,6 +644,90 @@ if showLabels and ta.crossunder(close, ma)
     };
   }
 
+
+  // ---------- strategy tester ----------
+  let tChart = null, tLast = null, tShown = 0;
+  const nf = (x, d = 2) => (x === null || x === undefined || Number.isNaN(x) ? '—' : Number(x).toLocaleString('ru-RU', { maximumFractionDigits: d, minimumFractionDigits: d }));
+  const fdt = (t) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const tMsg = (t, bad) => { const el = $('#testMsg'); el.textContent = t || ''; el.className = bad ? 'dn' : 'up'; };
+  async function tFillScripts() {
+    const j = await call('GET', 'mql/scripts'), el = $('#tScript'), keep = el.value;
+    el.innerHTML = j.scripts.filter((x) => x.lang === 'pine').map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('') || '<option value="">нет Pine-скриптов</option>';
+    if (keep) el.value = keep; if (el.value) await tDescribe(); else $('#tInputs').innerHTML = '<div style="color:var(--mut)">Загрузите Pine-стратегию в диалоге «MQL».</div>';
+  }
+  async function tDescribe() {
+    $('#tInputs').innerHTML = '<span style="color:var(--mut)">Разбор…</span>';
+    const d = await call('POST', `mql/scripts/${$('#tScript').value}/describe`);
+    if (!d.ok) { $('#tInputs').innerHTML = `<div class="dn">Ошибка: ${esc(d.error)}${d.line ? ` (строка ${d.line})` : ''}</div>`; return; }
+    if (!d.info.isStrategy) { $('#tInputs').innerHTML = '<div class="dn">Это индикатор: в скрипте нет strategy(...). Тестер работает со стратегиями.</div>'; return; }
+    $('#tInputs').innerHTML = d.info.inputs.map((q) => (q.kind === 'bool' ? `<label>${esc(q.title || q.name)} <input type="checkbox" data-ti="${esc(q.name)}" data-k="bool" ${q.default ? 'checked' : ''}></label>` : `<label>${esc(q.title || q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" data-ti="${esc(q.name)}" data-k="${q.kind}" value="${esc(q.default)}"></label>`)).join('') || '';
+  }
+  function tShowResult(r) {
+    tLast = r; const m = r.metrics, cls = (v) => (v >= 0 ? 'up' : 'dn');
+    $('#tMetrics').innerHTML = [
+      ['Чистая прибыль', `<span class="${cls(m.netProfit)}">${nf(m.netProfit)} (${nf(m.netProfitPct)}%)</span>`], ['Итоговый капитал', nf(m.finalEquity)], ['Сделок', m.trades], ['Win rate', nf(m.winRate, 1) + '%'],
+      ['Profit factor', m.profitFactor === null ? '∞' : nf(m.profitFactor, 3)], ['Макс. просадка', `<span class="dn">${nf(m.maxDrawdownPct)}%</span> (${nf(m.maxDrawdown)})`], ['Средняя прибыль', nf(m.avgWin)], ['Средний убыток', nf(m.avgLoss)],
+      ['Risk/Reward', m.riskReward === null ? '—' : nf(m.riskReward)], ['Комиссии', nf(m.commissionPaid)], ['Баров в сделке', nf(m.avgBarsInTrade, 1)], ['Buy & Hold', `${nf(m.buyHoldPct)}%`],
+    ].map(([k, v]) => `<div class="mc"><span>${k}</span><b>${v}</b></div>`).join('');
+    if (tChart) { tChart.remove(); tChart = null; }
+    const t = chartTheme(), LC = LightweightCharts;
+    tChart = LC.createChart($('#tChart'), { autoSize: true, layout: { background: { color: t.bg }, textColor: t.txt }, grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } }, timeScale: { timeVisible: true }, rightPriceScale: { borderColor: t.grid } });
+    const eq = tChart.addSeries(LC.AreaSeries, { lineColor: '#2962ff', topColor: 'rgba(41,98,255,0.28)', bottomColor: 'rgba(41,98,255,0)', priceLineVisible: false });
+    const pts = r.equity.map(([time, value]) => ({ time, value })); eq.setData(pts);
+    let peak = -Infinity; const dd = tChart.addSeries(LC.HistogramSeries, { priceScaleId: 'dd', color: 'rgba(239,83,80,0.55)', priceLineVisible: false, lastValueVisible: false });
+    dd.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    dd.setData(pts.map((p) => { peak = Math.max(peak, p.value); return { time: p.time, value: -((peak - p.value) / peak) * 100 }; }));
+    tChart.timeScale().fitContent();
+    tShown = 0; $('#tTrades').innerHTML = ''; tMoreTrades();
+    tMsg(`#${r.testId} · ${r.symbol || ''} ${r.tf ? '' : ''}`.trim());
+  }
+  function tMoreTrades() {
+    const r = tLast; if (!r) return; const rows = r.trades.slice().reverse().slice(tShown, tShown + 100);
+    if (!tShown) $('#tTrades').innerHTML = '<table><thead><tr><th>#</th><th>Напр.</th><th>Вход</th><th>Цена</th><th>Выход</th><th>Цена</th><th>Объём</th><th>P&L</th><th>Причина</th></tr></thead><tbody></tbody></table><button id="tMore" class="hidden">Показать ещё</button>';
+    const body = $('#tTrades tbody');
+    body.insertAdjacentHTML('beforeend', rows.map((x, i) => `<tr><td>${r.trades.length - tShown - i}</td><td class="${x.dir > 0 ? 'up' : 'dn'}">${x.dir > 0 ? 'Long' : 'Short'}</td><td>${fdt(x.entryTime)}</td><td>${nf(x.entryPrice)}</td><td>${fdt(x.exitTime)}</td><td>${nf(x.exitPrice)}</td><td>${nf(x.qty, 4)}</td><td class="${x.net >= 0 ? 'up' : 'dn'}">${nf(x.net)}</td><td>${esc(x.exitComment || '')}</td></tr>`).join(''));
+    tShown += rows.length; const more = $('#tMore'); more.classList.toggle('hidden', tShown >= r.trades.length); more.onclick = tMoreTrades;
+  }
+  async function tHistory() {
+    const j = await call('GET', 'tester/history');
+    $('#tHist').innerHTML = j.tests.map((x) => `<div class="mrow" data-tid="${x.id}"><span>${esc(x.strategy)}<br><small>${x.symbol} ${x.tf} · ${x.trades} сд.</small></span><span class="${x.net >= 0 ? 'up' : 'dn'}">${nf(+x.net, 0)}<button data-tdel="${x.id}" title="Удалить">✕</button></span></div>`).join('') || '<div style="color:var(--mut)">Пока пусто</div>';
+  }
+  function wireTester() {
+    const TFL = [['1', 'M1'], ['5', 'M5'], ['15', 'M15'], ['30', 'M30'], ['60', 'H1'], ['120', 'H2'], ['240', 'H4'], ['D', 'D1']];
+    $('#tTf').innerHTML = TFL.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+    $('#btnTest').onclick = async () => {
+      $('#testDlg').classList.remove('hidden'); const c = panes[active].cfg; $('#tCat').value = c.category; $('#tSym').value = c.symbol; if ([...$('#tTf').options].some((o) => o.value === c.tf)) $('#tTf').value = c.tf;
+      try { await tFillScripts(); await tHistory(); } catch (e) { tMsg(e.message, true); }
+    };
+    $('#testClose').onclick = () => $('#testDlg').classList.add('hidden');
+    $('#testDlg').onmousedown = (e) => { if (e.target.id === 'testDlg') $('#testDlg').classList.add('hidden'); };
+    $('#tScript').onchange = () => tDescribe().catch((e) => tMsg(e.message, true));
+    $('#tHist').onclick = async (e) => {
+      const del = e.target.dataset.tdel; if (del) { await call('DELETE', 'tester/' + del); tHistory(); return; }
+      const row = e.target.closest('.mrow'); if (!row) return; try { const r = await call('GET', 'tester/' + row.dataset.tid); r.tf = r.tf; tShowResult(r); tMsg(`#${r.testId} ${r.symbol} ${r.tf} · ${fdt(r.from).slice(0, 10)} → ${fdt(r.to).slice(0, 10)}`); } catch (x) { tMsg(x.message, true); }
+    };
+    $('#tRun').onclick = async () => {
+      const id = +$('#tScript').value; if (!id) { tMsg('Выберите стратегию', true); return; }
+      const inputs = {}; document.querySelectorAll('#tInputs [data-ti]').forEach((i) => { inputs[i.dataset.ti] = i.dataset.k === 'bool' ? i.checked : i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
+      const to = Math.floor(Date.now() / 1000), body = { id, category: $('#tCat').value, symbol: $('#tSym').value.trim().toUpperCase(), tf: $('#tTf').value, from: to - (+$('#tPeriod').value) * 86400, to, inputs };
+      const num = (sel, key) => { const v = $(sel).value.trim(); if (v !== '') body[key] = parseFloat(v); };
+      num('#tCap', 'initial_capital'); num('#tComm', 'commission_value'); num('#tSlip', 'slippage_ticks'); if ($('#tComm').value.trim() !== '') body.commission_type = 'percent';
+      $('#tRun').disabled = true; tMsg('Считаю… (загрузка истории Bybit может занять до минуты)');
+      try {
+        const r = await call('POST', 'tester/run', null, body);
+        if (!r.ok) { tMsg(r.error + (r.line ? ` (строка ${r.line})` : ''), true); } else { r.symbol = body.symbol; r.tf = body.tf; tShowResult(r); tMsg(`#${r.testId} · ${r.bars} баров · ${(r.ms / 1000).toFixed(1)} с`); tHistory(); }
+      } catch (e) { tMsg(e.message, true); }
+      $('#tRun').disabled = false;
+    };
+    $('#tOnChart').onclick = () => {
+      if (!tLast || !$('#tScript').value) return;
+      const p = panes[active], params = {}; document.querySelectorAll('#tInputs [data-ti]').forEach((i) => { params[i.dataset.ti] = i.dataset.k === 'bool' ? i.checked : i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
+      applyToPanes({ category: $('#tCat').value, symbol: $('#tSym').value.trim().toUpperCase(), tf: $('#tTf').value });
+      setTimeout(() => { panes[active].cfg.indicators.push({ uid: Date.now() + '' + Math.floor(Math.random() * 1000), type: 'mql', scriptId: +$('#tScript').value, name: ($('#tScript').selectedOptions[0] || {}).text || 'strategy', params, meta: { inputs: [] }, visible: true }); save(); panes[active].refreshIndicators(true); $('#testDlg').classList.add('hidden'); }, 1500);
+      void p;
+    };
+  }
+
   // ---------- indicators dialog & templates ----------
   const tplAll = () => store.get('tpl', {});
   function renderInd() {
@@ -703,7 +787,7 @@ if showLabels and ta.crossunder(close, ma)
   }
 
   function init() {
-    wireIndicators(); wireTools(); wireMql();
+    wireIndicators(); wireTools(); wireMql(); wireTester();
     $('#tfButtons').innerHTML = TFS.map(([v, l]) => `<button data-tf="${v}">${l}</button>`).join('');
     $('#tfButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ tf: b.dataset.tf }); };
     $('#typeButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ type: b.dataset.type }); };

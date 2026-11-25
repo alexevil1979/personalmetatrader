@@ -19,7 +19,7 @@ reg('strategy', SP, {}, (P) => (s, a, n) => {
     capital: t.initial_capital ?? g('initial_capital') ?? 1e6, pyramiding: t.pyramiding ?? g('pyramiding') ?? 0,
     qtyType: t.qty_type ?? g('default_qty_type') ?? 'fixed', qtyValue: t.qty_value ?? g('default_qty_value') ?? 1,
     commType: t.commission_type ?? g('commission_type') ?? 'percent', commValue: t.commission_value ?? g('commission_value') ?? 0,
-    slippage: t.slippage_ticks ?? g('slippage') ?? 0, poc: !!g('process_orders_on_close'), mintick: P.env.point,
+    slippage: t.slippage_ticks ?? g('slippage') ?? 0, poc: !!g('process_orders_on_close'), mintick: P.env.point, startTime: t.start_time || 0,
   });
 });
 const need = (P, w) => { if (!P.broker) throw new Error(`${w}: strategy() must be declared first`); return P.broker; };

@@ -36,6 +36,7 @@
   <select id="tz" title="Часовой пояс"><option value="UTC">UTC</option><option value="local">Локальное</option></select>
   <select id="theme" title="Тема"><option value="dark">Тёмная</option><option value="light">Светлая</option></select>
   <span class="grow"></span>
+  <button id="btnTest" title="Тестер стратегий (Pine strategy)">Тестер</button>
   <button id="btnMql" title="Скрипты и индикаторы MQL4/MQL5">MQL</button>
   <button id="btnInd" title="Индикаторы">ƒ Индикаторы</button>
   <button id="togWatch" class="on" title="Обзор рынка">Обзор</button>
@@ -65,6 +66,26 @@
   <div class="dlgrow"><select id="indAdd"></select><button id="indAddBtn">Добавить</button>
     <span class="grow"></span><select id="tplSel"></select><button id="tplApply">Применить</button><button id="tplSave">Сохранить шаблон</button><button id="tplDel">Удалить</button></div>
   <div id="indList"></div>
+</div></div>
+
+<div id="testDlg" class="dlg hidden"><div class="dlgbox mqlbox">
+  <div class="dlghead"><b>Тестер стратегий</b><span id="testMsg"></span><button id="testClose">✕</button></div>
+  <div class="mqlcols">
+    <div id="testSide">
+      <label>Стратегия <select id="tScript"></select></label>
+      <label>Рынок <select id="tCat"><option value="linear">USDT/USDC Perp</option><option value="spot">Spot</option><option value="inverse">Inverse</option></select></label>
+      <label>Символ <input id="tSym" placeholder="BTCUSDT"></label>
+      <label>Таймфрейм <select id="tTf"></select></label>
+      <label>Период <select id="tPeriod"><option value="30">30 дней</option><option value="90" selected>90 дней</option><option value="180">180 дней</option><option value="365">1 год</option><option value="730">2 года</option></select></label>
+      <label>Капитал <input id="tCap" type="number" placeholder="из скрипта"></label>
+      <label>Комиссия, % <input id="tComm" type="number" step="any" placeholder="из скрипта"></label>
+      <label>Проскальзывание, тиков <input id="tSlip" type="number" step="any" placeholder="из скрипта"></label>
+      <div class="sub">Параметры стратегии</div><div id="tInputs"></div>
+      <button id="tRun" class="on">Запустить тест</button><button id="tOnChart" title="Показать входы/выходы на графике">Сделки на график</button>
+      <div class="sub">История</div><div id="tHist"></div>
+    </div>
+    <div id="testMain"><div id="tMetrics" class="mgrid"></div><div id="tChart"></div><div id="tTrades"></div></div>
+  </div>
 </div></div>
 
 <div id="mqlDlg" class="dlg hidden"><div class="dlgbox mqlbox">

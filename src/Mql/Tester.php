@@ -48,6 +48,7 @@ final class Tester
             $tester['qty_type'] = $b['qty_type'];
         }
 
+        $tester['start_time'] = $from; // warm-up bars before $from do not trade
         $source = Scripts::source($uid, $scriptId, 'pine', (int) $row['current_version']);
         $d = Scripts::exec(['mode' => 'describe', 'lang' => 'pine', 'source' => $source]);
         if (!($d['ok'] ?? false)) {

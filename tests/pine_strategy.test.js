@@ -50,6 +50,12 @@ assert.strictEqual(r2.strategy.config.capital, 50000); assert.ok(r2.strategy.met
 assert.ok(r2.strategy.metrics.netProfit > r.strategy.metrics.netProfit - 1e-9 || true);
 console.log('OK tester overrides');
 
+// ---- 2b) warm-up: bars before start_time never trade, metrics cover only the tested period ----
+const startT = C[300].time, rw = go(SRC, C, { start_time: startT });
+assert.ok(rw.strategy.trades.every((x) => x.entryTime >= startT), 'no trades during warm-up');
+assert.ok(rw.strategy.equity.slice(0, 300).every((e) => e === 10000), 'flat equity in warm-up'); assert.strictEqual(rw.strategy.metrics.bars, 800 - 300);
+console.log('OK warm-up');
+
 // ---- 3) no look-ahead: trades closed before the cut are identical when future bars are removed ----
 const cut = 500, rc = go(SRC, C.slice(0, cut));
 const closedBefore = r.strategy.trades.filter((t) => t.exitBar < cut - 2), closedCut = rc.strategy.trades.filter((t) => t.exitBar < cut - 2);

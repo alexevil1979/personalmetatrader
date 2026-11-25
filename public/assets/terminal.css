@@ -72,3 +72,13 @@ main{flex:1;display:flex;min-height:0}
 #mqlInputs{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}#mqlInputs label{color:var(--mut)}#mqlInputs input{width:90px}#mqlInputs pre{width:100%;margin:2px 0}
 #mqlLogs{max-height:160px;overflow:auto;background:var(--bg);border:1px solid var(--line);padding:6px;margin:0;white-space:pre-wrap}
 #mqlMsg{flex:1;margin-left:10px}
+#testSide{width:270px;overflow:auto;display:flex;flex-direction:column;gap:6px;padding-right:6px}
+#testSide label{display:flex;flex-direction:column;gap:2px;color:var(--mut)}#testSide input,#testSide select{width:100%}
+#testSide .sub{margin-top:6px;font-weight:600;border-top:1px solid var(--line);padding-top:6px}
+#tInputs{display:flex;flex-direction:column;gap:4px}#tInputs label{flex-direction:row;justify-content:space-between;align-items:center}#tInputs input{width:90px}#tInputs input[type=checkbox]{width:auto}
+#tHist .mrow small{color:var(--mut)}#tHist button{margin-left:6px;padding:0 5px}
+#testMain{flex:1;min-width:0;overflow:auto;display:flex;flex-direction:column;gap:8px}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.mc{border:1px solid var(--line);border-radius:4px;padding:5px 8px;display:flex;flex-direction:column}.mc span{color:var(--mut);font-size:11px}.mc b{font-size:14px}
+#tChart{height:240px;min-height:240px;border:1px solid var(--line)}
+#tTrades table{width:100%;border-collapse:collapse}#tTrades th,#tTrades td{padding:3px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}#tTrades th{color:var(--mut);position:sticky;top:0;background:var(--panel)}

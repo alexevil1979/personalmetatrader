@@ -35,6 +35,7 @@ class Broker {
   // ---------- order API (called by the script) ----------
   place(o) {
     const i = this.C.i, c = this.C.close.arr[i];
+    if (this.cfg.startTime && this.C.time.arr[i] / 1000 < this.cfg.startTime) return; // warm-up bars: indicators run, no trading
     o.qty = o.kind === 'close' ? o.qty : this.qtyFor(o.qty, c); o.bar = i;
     if (o.kind !== 'close' || o.id !== undefined) this.orders = this.orders.filter((x) => !(x.kind === o.kind && x.id === o.id && o.kind !== 'close'));
     if (this.cfg.poc && o.limit === undefined && o.stop === undefined) { this.execute(o, c, i); return; } // process_orders_on_close
@@ -120,14 +121,14 @@ class Broker {
     const t = this.closed, wins = t.filter((x) => x.net > 0), losses = t.filter((x) => x.net < 0);
     const gp = wins.reduce((a, x) => a + x.net, 0), gl = -losses.reduce((a, x) => a + x.net, 0);
     const avgW = wins.length ? gp / wins.length : 0, avgL = losses.length ? gl / losses.length : 0;
-    const eq = this.equity, last = eq[n - 1] ?? this.cfg.capital, c0 = this.C.close.arr[0], c1 = this.C.close.arr[n - 1];
+    const eq = this.equity, last = eq[n - 1] ?? this.cfg.capital, st = this.cfg.startTime ? Math.max(0, this.C.time.arr.findIndex((x) => x / 1000 >= this.cfg.startTime)) : 0, c0 = this.C.close.arr[st], c1 = this.C.close.arr[n - 1];
     return {
       initialCapital: this.cfg.capital, finalEquity: last, netProfit: last - this.cfg.capital, netProfitPct: ((last - this.cfg.capital) / this.cfg.capital) * 100,
       closedProfit: t.reduce((a, x) => a + x.net, 0), openProfit: this.openProfit, grossProfit: gp, grossLoss: gl, profitFactor: gl > 0 ? gp / gl : gp > 0 ? null : 0,
       trades: t.length, wins: wins.length, losses: losses.length, winRate: t.length ? (wins.length / t.length) * 100 : 0, avgWin: avgW, avgLoss: avgL, riskReward: avgL > 0 ? avgW / avgL : null,
       avgTrade: t.length ? t.reduce((a, x) => a + x.net, 0) / t.length : 0, largestWin: wins.length ? Math.max(...wins.map((x) => x.net)) : 0, largestLoss: losses.length ? Math.min(...losses.map((x) => x.net)) : 0,
       maxDrawdown: this.maxDD, maxDrawdownPct: this.maxDDPct * 100, commissionPaid: this.commissionTotal, avgBarsInTrade: t.length ? t.reduce((a, x) => a + (x.exitBar - x.entryBar), 0) / t.length : 0,
-      openTrades: this.open.length, buyHoldPct: c0 ? ((c1 - c0) / c0) * 100 : 0, bars: n,
+      openTrades: this.open.length, buyHoldPct: c0 ? ((c1 - c0) / c0) * 100 : 0, bars: n - st,
     };
   }
 }
