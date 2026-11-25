@@ -85,7 +85,10 @@ if barstate.islast and repaint
             line.new(n-i+1, y1 + sae, n-i, nwe.get(i) + sae, color = upCss)
             line.new(n-i+1, y1 - sae, n-i, nwe.get(i) - sae, color = dnCss)
 
-
+        if src[i] > nwe.get(i) + sae and src[i+1] < nwe.get(i) + sae
+            label.new(n-i, src[i], '▼', color = color(na), style = label.style_label_down, textcolor = dnCss, textalign = text.align_center)
+        if src[i] < nwe.get(i) - sae and src[i+1] > nwe.get(i) - sae
+            label.new(n-i, src[i], '▲', color = color(na), style = label.style_label_up, textcolor = upCss, textalign = text.align_center)
 
         y1 := nwe.get(i)
 
@@ -109,7 +112,7 @@ plot(repaint ? na : out + mae, 'Upper', upCss)
 plot(repaint ? na : out - mae, 'Lower', dnCss)
 
 //Crossing Arrows
-//plotshape(ta.crossunder(close, out - mae) ? low : na, "Crossunder", shape.labelup, location.absolute, color(na), 0 , text = '▲', textcolor = upCss, size = size.tiny)
-//plotshape(ta.crossover(close, out + mae) ? high : na, "Crossover", shape.labeldown, location.absolute, color(na), 0 , text = '▼', textcolor = dnCss, size = size.tiny)
+plotshape(ta.crossunder(close, out - mae) ? low : na, "Crossunder", shape.labelup, location.absolute, color(na), 0 , text = '▲', textcolor = upCss, size = size.tiny)
+plotshape(ta.crossover(close, out + mae) ? high : na, "Crossover", shape.labeldown, location.absolute, color(na), 0 , text = '▼', textcolor = dnCss, size = size.tiny)
 
 //-----------------------------------------------------------------------------}

@@ -18,18 +18,28 @@ reg('plot', ['series', 'title', 'color', 'linewidth', 'style', 'trackprice', 'hi
   pl.width = n.linewidth ?? a[3] ?? 1; pl.style = n.style ?? a[4] ?? 'line'; pl.offset = n.offset ?? 0; pl.display = n.display;
   return pl;
 });
+const LABEL_SHAPES = { labelup: 'label_up', labeldown: 'label_down' };
+// real Pine signatures: plotshape(series, title, style, location, color, offset, text, textcolor, editable, size, ...)
 const shapeFn = (path, params) => reg(path, params, {}, (P) => (s, a, n) => {
-  const g = (name, idx) => (n[name] !== undefined ? n[name] : a[idx]);
+  const g = (name) => (n[name] !== undefined ? n[name] : a[params.indexOf(name)]);
   const cond = val(a[0]); if (!cond || (typeof cond === 'number' && Number.isNaN(cond))) return;
-  P.out.shapes.push({ bar: P.C.i, style: g('style', path === 'plotchar' ? 2 : 2) || 'circle', location: g('location', 3) || 'abovebar', color: colorOr(g('color', 4), '#2962FF'), text: g('text', path === 'plotchar' ? 7 : 6) || (path === 'plotchar' ? g('char', 1) : '') || '', textcolor: colorOr(g('textcolor', 5), '#d1d4dc'), size: g('size', 8) || 'auto' });
+  const style = (path === 'plotchar' ? 'circle' : g('style')) || 'circle', loc = g('location') || 'abovebar', text = g('text') || (path === 'plotchar' ? g('char') : '') || '';
+  const color = colorOr(g('color'), '#2962FF'), textcolor = colorOr(g('textcolor'), '#d1d4dc'), size = g('size') || 'auto';
+  if (loc === 'absolute') { // the series value is the price: draw as a free-standing label
+    if (typeof cond !== 'number') return;
+    P.out.labels.push({ id: P.out.labels.length, x: P.C.i + (g('offset') || 0), y: cond, text: String(text), xloc: 'bar_index', yloc: 'price', color, style: LABEL_SHAPES[style] || (style === 'circle' ? 'label_center' : 'label_center'), textcolor, size, bar: P.C.i, deleted: false, shape: true });
+    return;
+  }
+  P.out.shapes.push({ bar: P.C.i, style, location: loc, color, text: String(text), textcolor, size });
 });
-shapeFn('plotshape', ['series', 'title', 'style', 'location', 'color', 'textcolor', 'text', 'size', 'offset']);
-shapeFn('plotchar', ['series', 'title', 'char', 'location', 'color', 'textcolor', 'text', 'size', 'offset']);
+shapeFn('plotshape', ['series', 'title', 'style', 'location', 'color', 'offset', 'text', 'textcolor', 'editable', 'size', 'show_last', 'display']);
+shapeFn('plotchar', ['series', 'title', 'char', 'location', 'color', 'offset', 'text', 'textcolor', 'editable', 'size', 'show_last', 'display']);
+reg('color', ['c'], {}, () => (s, a) => (typeof a[0] === 'string' ? a[0] : 'rgba(0,0,0,0)')); // color(na) -> fully transparent
 reg('bgcolor', ['color', 'offset', 'editable', 'show_last', 'title', 'display'], {}, (P) => (s, a, n) => { const c = n.color !== undefined ? n.color : a[0]; if (typeof c === 'string') P.out.bg[P.C.i] = c; });
 reg('hline', ['price', 'title', 'color', 'linestyle', 'linewidth'], {}, (P) => (s, a, n) => { const found = P.out.hlines.find((h) => h.site === s); if (!found) P.out.hlines.push({ site: s, price: a[0], title: n.title || a[1] || '', color: colorOr(n.color ?? a[2], '#787B86'), style: n.linestyle ?? a[3] ?? 'dashed' }); });
 
 // ---------- labels ----------
-const limit = (P, list, max) => { const live = list.filter((o) => !o.deleted); for (let k = 0; k < live.length - max; k++) live[k].deleted = true; };
+const limit = (P, list, max) => { const live = list.filter((o) => !o.deleted && !o.shape); for (let k = 0; k < live.length - max; k++) live[k].deleted = true; };
 reg('label.new', ['x', 'y', 'text', 'xloc', 'yloc', 'color', 'style', 'textcolor', 'size', 'textalign', 'tooltip', 'text_font_family'], {}, (P) => (s, a, n) => {
   const g = (name, i) => (n[name] !== undefined ? n[name] : a[i]);
   const o = { id: P.out.labels.length, x: val(g('x', 0)), y: val(g('y', 1)), text: String(g('text', 2) ?? ''), xloc: g('xloc', 3) || 'bar_index', yloc: g('yloc', 4) || 'price', color: colorOr(g('color', 5), '#2962FF'), style: g('style', 6) || 'label_down', textcolor: colorOr(g('textcolor', 7), '#ffffff'), size: g('size', 8) || 'normal', bar: P.C.i, deleted: false };
