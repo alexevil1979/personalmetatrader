@@ -1,0 +1,13 @@
+{
+  "name": "alexevil1979/personalmetatrader",
+  "description": "Personal MetaTrader-style web terminal for Bybit market analysis",
+  "type": "project",
+  "require": {
+    "php": ">=8.3",
+    "ext-pdo_mysql": "*",
+    "ext-curl": "*",
+    "ext-sodium": "*",
+    "ext-mbstring": "*"
+  },
+  "autoload": { "psr-4": { "PMT\\": "src/" } }
+}
