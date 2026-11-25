@@ -12,9 +12,9 @@ cd /ssd/www/personalmetatrader
 cp .env.example .env     # fill DB_PASS and APP_KEY
 php bin/migrate.php      # creates tables
 ```
-Then install `deploy/pmt-apache.conf` (own vhost, port 8088) and a dedicated PHP 8.3-FPM pool (`deploy/pmt-fpm.conf`).
+Then install `deploy/pmt-apache.conf` (own vhost, port 18088) and a dedicated PHP 8.3-FPM pool (`deploy/pmt-fpm.conf`).
 
-Health check: `curl http://HOST:8088/api/health`
+Health check: `curl http://HOST:18088/api/health`
 
 ## Update
 ```bash
