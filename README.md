@@ -5,7 +5,7 @@ Stack: PHP 8.3+, MySQL 8, Apache 2.4, Redis, vanilla JS + TradingView Lightweigh
 
 Live: https://pmt.1tlt.ru (also :18088 on the LAN).
 
-Status: **Stages 1-5 + auth/DB done** (infra; terminal UI, Bybit REST + WebSocket, candle cache; 33 indicators; 14 drawing tools). See [docs/AUDIT.md](docs/AUDIT.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Status: **Stages 1-5 + auth/DB + Pine Script done** (infra; terminal UI, Bybit REST + WebSocket, candle cache; 33 indicators; 14 drawing tools). See [docs/AUDIT.md](docs/AUDIT.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Install
 ```bash
@@ -49,3 +49,6 @@ Secrets live only in `.env` (git-ignored). Prepared statements everywhere; API k
 
 ## Stage 5 notes (MQL)
 MQL4/MQL5 indicators are executed by an own compiler/runtime in a sandbox (separate OS user, no network, rlimits). EX4/EX5 are stored but not executed. See [docs/MQL.md](docs/MQL.md) for architecture, the honest list of supported functions, limits and tests (`node tests/mql.test.js`). Deploy/update the sandbox with `sh deploy/install-mql.sh`.
+
+## Pine Script
+TradingView Pine v5 indicators run in the same sandbox as MQL (upload `.pine` in the MQL dialog). Labels, lines, tables, plots, shapes and background colours are rendered on the chart; `request.security` fetches higher timeframes from Bybit. See [docs/PINE.md](docs/PINE.md) for the supported subset and limits; tests: `node tests/pine.test.js`.
