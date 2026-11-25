@@ -64,13 +64,21 @@ function generate(src) {
         return `P.sub(${++sid},${expr(e.e)},${expr(e.i)},C)`;
       }
       case 'tupleLit': return `[${e.items.map(expr).join(',')}]`;
+      case 'ifx': return `(()=>{${stmt(e.st, true)}return NaN;})()`;
+      case 'switchx': return `(()=>{${stmt(e.st, true)}return NaN;})()`;
       case 'call': return call(e);
       default: err(`unsupported expression ${e.k}`);
     }
     return '';
   }
   function call(e) {
-    const path = pathOf(e.fn); if (!path) err('unsupported call target', e.line);
+    let path = pathOf(e.fn); if (!path) err('unsupported call target', e.line);
+    if (e.fn.k === 'mem') { // method syntax on a variable: a.push(x) -> array.push(a, x)
+      let root = e.fn; while (root.k === 'mem') root = root.e;
+      if (root.k === 'id' && (lookupLocal(root.name) || tops.has(root.name)) && !funcs.has(path)) {
+        return `P.m(${++sid},${q(e.fn.name)},[${[expr(e.fn.e), ...e.args.map(expr)].join(',')}])`;
+      }
+    }
     const nparams = (a) => a;
     void nparams;
     if (funcs.has(path)) {
@@ -136,18 +144,22 @@ function generate(src) {
         const t = assignTarget(s.name, s.line), op = s.op === ':=' ? '' : s.op[0];
         return op ? `${t}=${op === '+' ? `P.add(${t},${expr(s.e)})` : `(${t}${op}${expr(s.e)})`};` : `${t}=${expr(s.e)};`;
       }
-      case 'if': return `if(${expr(s.c)}){${block(s.then)}}${s.els ? `else{${block(s.els)}}` : ''}`;
+      case 'if': return `if(${expr(s.c)}){${block(s.then, isLast)}}${s.els ? `else{${block(s.els, isLast)}}` : ''}`;
       case 'for': {
         scopes.push(new Set([s.v])); const b = block(s.body); scopes.pop();
         const i = `l_${s.v}`;
         return `for(let ${i}=${expr(s.from)},$e=${expr(s.to)},$s=${s.by ? expr(s.by) : `(${i}<=$e?1:-1)`};$s>0?${i}<=$e:${i}>=$e;${i}+=$s){${tick}${b}}`;
+      }
+      case 'forin': {
+        scopes.push(new Set([s.v, ...(s.idx ? [s.idx] : [])])); const b = block(s.body); scopes.pop();
+        return s.idx ? `for(const [l_${s.idx},l_${s.v}] of P.iter(${expr(s.it)},true)){${tick}${b}}` : `for(const l_${s.v} of P.iter(${expr(s.it)})){${tick}${b}}`;
       }
       case 'while': return `while(${expr(s.c)}){${tick}${block(s.body)}}`;
       case 'break': return 'break;';
       case 'continue': return 'continue;';
       case 'switch': {
         const subj = s.subj ? expr(s.subj) : null; let out = `{const $sw=${subj};`; let first = true; let dflt = '';
-        for (const c of s.cases) { if (c.test === null) { dflt = block(c.body); continue; } out += `${first ? '' : 'else '}if(${subj ? `$sw===${expr(c.test)}` : expr(c.test)}){${block(c.body)}}`; first = false; }
+        for (const c of s.cases) { if (c.test === null) { dflt = block(c.body, isLast); continue; } out += `${first ? '' : 'else '}if(${subj ? `$sw===${expr(c.test)}` : expr(c.test)}){${block(c.body, isLast)}}`; first = false; }
         return out + (dflt ? (first ? `{${dflt}}` : `else{${dflt}}`) : '') + '}';
       }
       case 'func': return ''; // hoisted

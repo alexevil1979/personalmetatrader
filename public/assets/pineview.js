@@ -43,6 +43,7 @@
       for (const res of this.items.values()) {
         if (bottom) { this.drawBg(ctx, res, W, H); continue; }
         this.drawHlines(ctx, res, W);
+        this.drawBoxes(ctx, res, W, H);
         this.drawLines(ctx, res, W, H);
         this.drawLabels(ctx, res);
         this.drawTables(ctx, res, W, H);
@@ -78,6 +79,18 @@
         ctx.strokeStyle = l.color; ctx.lineWidth = l.width || 1; ctx.setLineDash(DASH[l.style] || []); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
       }
       ctx.setLineDash([]);
+    }
+    drawBoxes(ctx, res, W, H) {
+      for (const b of res.boxes || []) {
+        const bt = (v) => (b.xloc === 'bar_time' ? this.Xt(v) : this.X(res, v));
+        let x1 = bt(b.left), x2 = bt(b.right); const y1 = this.Y(b.top), y2 = this.Y(b.bottom);
+        if (x1 === null || x2 === null || y1 === null || y2 === null) continue;
+        if (b.extend === 'left' || b.extend === 'both') x1 = -10; if (b.extend === 'right' || b.extend === 'both') x2 = W + 10;
+        const x = Math.min(x1, x2), y = Math.min(y1, y2), w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
+        if (b.bgcolor) { ctx.fillStyle = b.bgcolor; ctx.fillRect(x, y, w, h); }
+        if (b.borderWidth) { ctx.strokeStyle = b.border; ctx.lineWidth = b.borderWidth; ctx.setLineDash(DASH[b.style] || []); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]); }
+        if (b.text) { ctx.font = `${FONT[b.textSize] || 12}px sans-serif`; ctx.fillStyle = b.textColor; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.text, x + w / 2, y + h / 2); }
+      }
     }
     drawLabels(ctx, res) {
       for (const lb of res.labels || []) {

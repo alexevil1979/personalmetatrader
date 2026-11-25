@@ -71,7 +71,10 @@ function parse(src) {
     for (;;) { skipNl(); if (peek().t === 'dedent') { p++; break; } if (peek().t === 'eof') break; body.push(statement()); }
     return body;
   }
-  const endStmt = () => { if (peek().t === 'nl') p++; else if (!['dedent', 'eof'].includes(peek().t)) err(`unexpected '${peek().v}'`); };
+  let blockEnded = false;
+  const endStmt = () => { if (blockEnded) { blockEnded = false; return; } if (peek().t === 'nl') p++; else if (!['dedent', 'eof'].includes(peek().t)) err(`unexpected '${peek().v}'`); };
+  const skipGeneric = () => { eatOp('<'); let d = 1; while (d > 0) { if (peek().t === 'eof') err("unterminated '<'"); if (isOp('<')) d++; else if (isOp('>')) d--; p++; } };
+  const chainPath = (e) => (e.k === 'id' ? e.name : e.k === 'mem' ? (chainPath(e.e) || '') + '.' + e.name : null);
 
   function statement() {
     const t = peek(), line = t.line;
@@ -79,7 +82,9 @@ function parse(src) {
       switch (t.v) {
         case 'if': return ifStmt();
         case 'for': {
-          p++; const v = ident();
+          p++;
+          if (isOp('[')) { p++; const v1 = ident(); eatOp(','); const v2 = ident(); eatOp(']'); if (!isKw('in')) err("'in' expected"); p++; const it = expr(); return { k: 'forin', v: v2, idx: v1, it, body: block(), line }; }
+          const v = ident();
           if (isKw('in')) { p++; const it = expr(); return { k: 'forin', v, it, body: block(), line }; }
           eatOp('='); const from = expr(); if (!isKw('to')) err("'to' expected"); p++; const to = expr(); let by = null; if (isKw('by')) { p++; by = expr(); }
           return { k: 'for', v, from, to, by, body: block(), line };
@@ -105,7 +110,7 @@ function parse(src) {
       if (isOp('(', 1)) { let k = 2, d = 1; while (d > 0 && peek(k).t !== 'eof') { if (isOp('(', k)) d++; else if (isOp(')', k)) d--; k++; } if (isOp('=>', k)) return funcDef(); }
       // typed declaration: type name = ...   |   series<float> name = ...
       if (TYPES.has(t.v) && peek(1).t === 'id' && (isOp('=', 2))) return declaration(false);
-      if (t.v === 'array' || t.v === 'map' || t.v === 'matrix') err(`'${t.v}' collections are not supported yet`);
+      if ((t.v === 'array' || t.v === 'map' || t.v === 'matrix') && isOp('<', 1)) return declaration(false);
     }
     // assignment / expression
     const e = expr();
@@ -117,8 +122,8 @@ function parse(src) {
   }
   function declaration(afterVar) {
     const line = peek().line; let name;
-    if (peek().t === 'id' && TYPES.has(peek().v) && peek(1).t === 'id') p++; // skip type annotation
-    else if (peek().t === 'id' && peek().v === 'array') err("'array' is not supported yet");
+    if (peek().t === 'id' && (peek().v === 'array' || peek().v === 'map' || peek().v === 'matrix') && isOp('<', 1)) { p++; skipGeneric(); }
+    else if (peek().t === 'id' && TYPES.has(peek().v) && peek(1).t === 'id') p++; // skip type annotation
     name = ident(); eatOp('='); const e = expr(); endStmt(); return { k: 'decl', name, e, line, var: afterVar };
   }
   function ident() { if (peek().t !== 'id') err('identifier expected'); return toks[p++].v; }
@@ -164,6 +169,7 @@ function parse(src) {
   function postfix() {
     let e = primary();
     for (;;) {
+      if (isOp('<') && /^(array|map|matrix)\.new$/.test(chainPath(e) || '')) { skipGeneric(); continue; }
       if (isOp('(') ) { e = callArgs(e); continue; }
       if (isOp('[')) { p++; const i = expr(); eatOp(']'); e = { k: 'sub', e, i, line: peek().line }; continue; }
       if (isOp('.') && peek(1).t === 'id') { p++; e = { k: 'mem', e, name: toks[p++].v }; continue; }
@@ -188,7 +194,8 @@ function parse(src) {
     if (t.t === 'id') { p++; return { k: 'id', name: t.v, line: t.line }; }
     if (isOp('(')) { p++; const e = expr(); eatOp(')'); return { k: 'paren', e }; }
     if (isOp('[')) { p++; const items = []; while (!isOp(']')) { items.push(expr()); if (isOp(',')) p++; } p++; return { k: 'tupleLit', items }; }
-    if (t.t === 'kw' && t.v === 'if') err('"if" used as an expression is not supported');
+    if (t.t === 'kw' && t.v === 'if') { const st = ifStmt(); blockEnded = true; return { k: 'ifx', st }; }
+    if (t.t === 'kw' && t.v === 'switch') { const st = switchStmt(); blockEnded = true; return { k: 'switchx', st }; }
     err(`unexpected '${t.v === null ? t.t : t.v}'`);
   }
 

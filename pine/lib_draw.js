@@ -5,7 +5,7 @@ const { val, rgba } = require('./lib_core');
 
 reg('indicator', ['title', 'shorttitle', 'overlay', 'format', 'precision', 'scale', 'max_bars_back', 'timeframe', 'timeframe_gaps', 'explicit_plot_zorder', 'max_lines_count', 'max_labels_count', 'max_boxes_count'], {}, (P) => (s, a, n) => {
   const g = (name, i) => (n[name] !== undefined ? n[name] : a[i]);
-  P.ind = { title: g('title', 0) || 'Pine script', short: g('shorttitle', 1), overlay: !!g('overlay', 2), maxLabels: Math.min(500, g('max_labels_count', 11) || 50), maxLines: Math.min(500, g('max_lines_count', 10) || 50) };
+  P.ind = { title: g('title', 0) || 'Pine script', short: g('shorttitle', 1), overlay: !!g('overlay', 2), maxLabels: Math.min(500, g('max_labels_count', 11) || 50), maxLines: Math.min(500, g('max_lines_count', 10) || 50), maxBoxes: Math.min(500, g('max_boxes_count', 12) || 50) };
 });
 const colorOr = (x, d) => (typeof x === 'string' ? x : d);
 
@@ -53,6 +53,19 @@ reg('line.set_xy2', ['id', 'x', 'y'], {}, () => (s, a) => { const o = need(a[0],
 reg('line.set_x2', ['id', 'x'], {}, () => (s, a) => { need(a[0], 'line.set_x2').x2 = a[1]; }); reg('line.set_y2', ['id', 'y'], {}, () => (s, a) => { need(a[0], 'line.set_y2').y2 = a[1]; });
 reg('line.set_color', ['id', 'color'], {}, () => (s, a) => { need(a[0], 'line.set_color').color = a[1]; }); reg('line.set_width', ['id', 'w'], {}, () => (s, a) => { need(a[0], 'line.set_width').width = a[1]; });
 reg('line.set_extend', ['id', 'e'], {}, () => (s, a) => { need(a[0], 'line.set_extend').extend = a[1]; });
+
+// ---------- boxes ----------
+reg('box.new', ['left', 'top', 'right', 'bottom', 'border_color', 'border_width', 'border_style', 'extend', 'xloc', 'bgcolor', 'text', 'text_size', 'text_color', 'text_halign', 'text_valign', 'text_wrap', 'text_font_family'], {}, (P) => (s, a, n) => {
+  const g = (name, i) => (n[name] !== undefined ? n[name] : a[i]);
+  const o = { id: P.out.boxes.length, left: val(g('left', 0)), top: val(g('top', 1)), right: val(g('right', 2)), bottom: val(g('bottom', 3)), border: colorOr(g('border_color', 4), '#2962FF'), borderWidth: g('border_width', 5) ?? 1, style: g('border_style', 6) || 'solid', extend: g('extend', 7) || 'none', xloc: g('xloc', 8) || 'bar_index', bgcolor: colorOr(g('bgcolor', 9), 'rgba(41,98,255,0.15)'), text: String(g('text', 10) ?? ''), textSize: g('text_size', 11) || 'normal', textColor: colorOr(g('text_color', 12), '#d1d4dc'), bar: P.C.i, deleted: false };
+  P.out.boxes.push(o); limit(P, P.out.boxes, P.ind.maxBoxes); return o;
+});
+reg('box.delete', ['id'], {}, () => (s, a) => { if (a[0] && typeof a[0] === 'object') a[0].deleted = true; });
+for (const [nm, ks] of [['left', ['left']], ['right', ['right']], ['top', ['top']], ['bottom', ['bottom']], ['lefttop', ['left', 'top']], ['rightbottom', ['right', 'bottom']]]) {
+  reg(`box.set_${nm}`, ['id', 'a', 'b'], {}, () => (s, a) => { const o = need(a[0], `box.set_${nm}`); ks.forEach((k, i) => { o[k] = val(a[i + 1]); }); });
+}
+reg('box.set_bgcolor', ['id', 'color'], {}, () => (s, a) => { need(a[0], 'box.set_bgcolor').bgcolor = a[1]; }); reg('box.set_border_color', ['id', 'color'], {}, () => (s, a) => { need(a[0], 'box.set_border_color').border = a[1]; });
+reg('box.set_text', ['id', 'text'], {}, () => (s, a) => { need(a[0], 'box.set_text').text = String(a[1]); });
 
 // ---------- tables ----------
 reg('table.new', ['position', 'columns', 'rows', 'bgcolor', 'frame_color', 'frame_width', 'border_color', 'border_width'], {}, (P) => (s, a, n) => {
