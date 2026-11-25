@@ -1,0 +1,559 @@
+//@version=5
+indicator("Price Channel + Trend Flip", overlay=true, max_labels_count=100)
+
+// ==========================================
+// ПАРАМЕТРЫ PRICE CHANNEL
+// ==========================================
+length = input.int(20, "Price Channel: Length", minval=1, group="Price Channel")
+showSignals = input.bool(true, "Price Channel: Показывать сигналы", group="Price Channel")
+
+// ==========================================
+// ПАРАМЕТРЫ SPECIAL SEQ (2-3-4)
+// ==========================================
+showSpecial = input.bool(true, "Special: Показывать особые сигналы (2-3-4)", group="Special Seq")
+maxBodyUsd = input.float(500.0, "Special: Макс. тело 4-й свечи (USD)", group="Special Seq")
+
+// ==========================================
+// ПАРАМЕТРЫ TREND FLIP ARROWS
+// ==========================================
+showTrendFlip = input.bool(true, "Trend Flip: Показывать стрелки разворота", group="Trend Flip")
+maxSeries = input.float(500.0, "Trend Flip: Максимальная интенсивность серии", minval=1.0, group="Trend Flip")
+// Кол-во уровней линий на сторону (вверх и вниз). Макс. 5 => всего до 10 линий.
+trendFlipLinesCount = input.int(5, "Trend Flip: Кол-во уровней линий (на сторону)", minval=1, maxval=5, group="Trend Flip")
+
+// ==========================================
+// PRICE CHANNEL: РАСЧЕТ КАНАЛОВ
+// ==========================================
+upper = ta.highest(high, length)
+lower = ta.lowest(low, length)
+upperPrev = upper[1]
+lowerPrev = lower[1]
+
+// ==========================================
+// PRICE CHANNEL: УСЛОВИЯ СИГНАЛОВ
+// ==========================================
+longSignal = high == upperPrev
+shortSignal = low == lowerPrev
+
+// ==========================================
+// PRICE CHANNEL: КАНАЛЫ НА ГРАФИКЕ
+// ==========================================
+//plot(upper, "Upper Channel", color=color.new(color.green, 0), linewidth=2)
+//plot(lower, "Lower Channel", color=color.new(color.red, 0), linewidth=2)
+
+// ==========================================
+// PRICE CHANNEL: СИГНАЛЫ СТРЕЛКАМИ ЧЕРЕЗ LABEL
+// ==========================================
+if showSignals and longSignal
+    label.new(bar_index, low, "BUY", style=label.style_label_up, textcolor=color.white, color=color.green, yloc=yloc.belowbar)
+
+if showSignals and shortSignal
+    label.new(bar_index, high, "SELL", style=label.style_label_down, textcolor=color.white, color=color.red, yloc=yloc.abovebar)
+
+// ==========================================
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ==========================================
+bodySize(cOpen, cClose) => math.abs(cClose - cOpen)
+isBull(cOpen, cClose) => cClose > cOpen
+isBear(cOpen, cClose) => cClose < cOpen
+
+// ==========================================
+// ПЕРЕМЕННЫЕ ДЛЯ TREND FLIP
+// ==========================================
+var string trend = na
+var float last_flip_close = na
+var float total_result = na
+var float prev_total_result = na
+var float extreme_open = na
+var float extreme_close = na
+var float up_series_total = 0
+var float down_series_total = 0
+var bool last_increase = true
+// Убраны массивы для оптимизации - не используются
+var float currentDelta = na
+// Уровень бара, пробой которого создал текущий flip (старый экстремум)
+var float flipLevel = na
+// Линии и уровни последних стрелок вверх и вниз на текущем ТФ (по 5 на сторону, но рисуем не более trendFlipLinesCount)
+var line lastUpArrowLine1 = na
+var line lastUpArrowLine2 = na
+var line lastUpArrowLine3 = na
+var line lastUpArrowLine4 = na
+var line lastUpArrowLine5 = na
+var float lastUpArrowLevel1 = na
+var float lastUpArrowLevel2 = na
+var float lastUpArrowLevel3 = na
+var float lastUpArrowLevel4 = na
+var float lastUpArrowLevel5 = na
+var line lastDownArrowLine1 = na
+var line lastDownArrowLine2 = na
+var line lastDownArrowLine3 = na
+var line lastDownArrowLine4 = na
+var line lastDownArrowLine5 = na
+var float lastDownArrowLevel1 = na
+var float lastDownArrowLevel2 = na
+var float lastDownArrowLevel3 = na
+var float lastDownArrowLevel4 = na
+var float lastDownArrowLevel5 = na
+
+// ==========================================
+// ПОЛУЧЕНИЕ ДАННЫХ С H4 И D1 ТАЙМФРЕЙМОВ
+// ==========================================
+[h4Open, h4High, h4Low, h4Close, h4Time] = request.security(syminfo.tickerid, "240", [open, high, low, close, time], lookahead=barmerge.lookahead_off)
+[h4PrevOpen, h4PrevClose] = request.security(syminfo.tickerid, "240", [open[1], close[1]], lookahead=barmerge.lookahead_off)
+
+[d1Open, d1High, d1Low, d1Close, d1Time] = request.security(syminfo.tickerid, "D", [open, high, low, close, time], lookahead=barmerge.lookahead_off)
+[d1PrevOpen, d1PrevClose] = request.security(syminfo.tickerid, "D", [open[1], close[1]], lookahead=barmerge.lookahead_off)
+
+// ==========================================
+// ОТСЛЕЖИВАНИЕ ПОСЛЕДНЕГО НАПРАВЛЕНИЯ
+// ==========================================
+var string lastDirection = na
+var float firstCandleOpen = na
+var string lastDirectionReason = na
+var float lastSignalClose = na
+
+var string h4LastDirection = na
+var float h4FirstCandleOpen = na
+var string h4LastDirectionReason = na
+var float h4LastSignalClose = na
+
+var string d1LastDirection = na
+var float d1FirstCandleOpen = na
+var string d1LastDirectionReason = na
+var float d1LastSignalClose = na
+
+h4CloseHour = hour(time, "UTC")
+h4CloseMinute = minute(time, "UTC")
+isH1 = timeframe.period == "60" or timeframe.in_seconds(timeframe.period) == 3600
+isH4BarClose = isH1 and ((h4CloseHour + 1) % 4 == 0) and (h4CloseMinute == 0)
+
+// ==========================================
+// TREND FLIP ARROWS: ЛОГИКА
+// ==========================================
+flip = false
+
+if showTrendFlip
+    if na(last_flip_close)
+        trend := close > open ? "up" : "down"
+        last_flip_close := close
+        total_result := close
+        prev_total_result := close
+        extreme_open := open
+        extreme_close := close
+        up_series_total := 0
+        down_series_total := 0
+        last_increase := true
+
+    if trend == "up"
+        if close > open
+            if close > extreme_close
+                extreme_close := close
+                extreme_open := open
+        else
+            if close < extreme_open
+                // Запоминаем уровень бара, пробой которого дал стрелку (старый экстремум)
+                flipLevel := extreme_open
+                flip := true
+                trend := "down"
+                extreme_close := close
+                extreme_open := open
+    else
+        if close < open
+            if close < extreme_close
+                extreme_close := close
+                extreme_open := open
+        else
+            if close > extreme_open
+                // Запоминаем уровень бара, пробой которого дал стрелку (старый экстремум)
+                flipLevel := extreme_open
+                flip := true
+                trend := "up"
+                extreme_close := close
+                extreme_open := open
+
+    if flip
+        delta = trend == "up" ? last_flip_close - close : -(last_flip_close - close)
+        currentDelta := delta
+        total_result := total_result + delta
+
+        if delta >= 0
+            if not last_increase
+                up_series_total := 0
+            up_series_total += delta
+            last_increase := true
+        else
+            if last_increase
+                down_series_total := 0
+            down_series_total += -delta
+            last_increase := false
+
+        if showTrendFlip and barstate.isconfirmed
+            lastDirection := trend == "up" ? "ВВЕРХ" : "ВНИЗ"
+            firstCandleOpen := extreme_open
+            lastSignalClose := close
+            lastDirectionReason := "Trend Flip"
+
+        labelColor = trend == "up" ? color.red : color.green
+        barRange = high - low
+        h1OffsetDown = low - barRange * 0.5
+        h1OffsetUp = high + barRange * 0.5
+
+        if trend == "up"
+            if delta > 0
+                labelText = "↑\nΔ: " + str.tostring(math.round(delta), "#")
+                label.new(bar_index, h1OffsetDown, labelText, yloc=yloc.price, style=label.style_label_center, color=labelColor, textcolor=color.white, size=size.small)
+            else
+                labelText = "↑"
+                label.new(bar_index, h1OffsetDown, labelText, yloc=yloc.price, style=label.style_label_center, color=labelColor, textcolor=color.white, size=size.small)
+        else
+            if delta > 0
+                labelText = "↓\nΔ: " + str.tostring(math.round(delta), "#")
+                label.new(bar_index, h1OffsetUp, labelText, yloc=yloc.price, style=label.style_label_center, color=labelColor, textcolor=color.white, size=size.small)
+            else
+                labelText = "↓"
+                label.new(bar_index, h1OffsetUp, labelText, yloc=yloc.price, style=label.style_label_center, color=labelColor, textcolor=color.white, size=size.small)
+
+        // Рисуем/обновляем горизонтальные линии по последним стрелкам (до 5 уровней вверх и 5 вниз)
+        if not na(flipLevel)
+            if trend == "up"
+                lastUpArrowLevel5 := lastUpArrowLevel4
+                lastUpArrowLevel4 := lastUpArrowLevel3
+                lastUpArrowLevel3 := lastUpArrowLevel2
+                lastUpArrowLevel2 := lastUpArrowLevel1
+                lastUpArrowLevel1 := flipLevel
+
+                if not na(lastUpArrowLine1)
+                    line.delete(lastUpArrowLine1)
+                    lastUpArrowLine1 := na
+                if not na(lastUpArrowLine2)
+                    line.delete(lastUpArrowLine2)
+                    lastUpArrowLine2 := na
+                if not na(lastUpArrowLine3)
+                    line.delete(lastUpArrowLine3)
+                    lastUpArrowLine3 := na
+                if not na(lastUpArrowLine4)
+                    line.delete(lastUpArrowLine4)
+                    lastUpArrowLine4 := na
+                if not na(lastUpArrowLine5)
+                    line.delete(lastUpArrowLine5)
+                    lastUpArrowLine5 := na
+
+                if trendFlipLinesCount >= 1 and not na(lastUpArrowLevel1)
+                    lastUpArrowLine1 := line.new(x1=bar_index, y1=lastUpArrowLevel1, x2=bar_index + 500, y2=lastUpArrowLevel1, extend=extend.both, color=color.new(color.green, 10), style=line.style_solid, width=3, xloc=xloc.bar_index)
+                if trendFlipLinesCount >= 2 and not na(lastUpArrowLevel2)
+                    lastUpArrowLine2 := line.new(x1=bar_index, y1=lastUpArrowLevel2, x2=bar_index + 500, y2=lastUpArrowLevel2, extend=extend.both, color=color.new(color.green, 25), style=line.style_solid, width=3, xloc=xloc.bar_index)
+                if trendFlipLinesCount >= 3 and not na(lastUpArrowLevel3)
+                    lastUpArrowLine3 := line.new(x1=bar_index, y1=lastUpArrowLevel3, x2=bar_index + 500, y2=lastUpArrowLevel3, extend=extend.both, color=color.new(color.green, 30), style=line.style_solid, width=3, xloc=xloc.bar_index)
+                if trendFlipLinesCount >= 4 and not na(lastUpArrowLevel4)
+                    lastUpArrowLine4 := line.new(x1=bar_index, y1=lastUpArrowLevel4, x2=bar_index + 500, y2=lastUpArrowLevel4, extend=extend.both, color=color.new(color.green, 35), style=line.style_solid, width=3, xloc=xloc.bar_index)
+                if trendFlipLinesCount >= 5 and not na(lastUpArrowLevel5)
+                    lastUpArrowLine5 := line.new(x1=bar_index, y1=lastUpArrowLevel5, x2=bar_index + 500, y2=lastUpArrowLevel5, extend=extend.both, color=color.new(color.green, 40), style=line.style_solid, width=3, xloc=xloc.bar_index)
+            else
+                lastDownArrowLevel5 := lastDownArrowLevel4
+                lastDownArrowLevel4 := lastDownArrowLevel3
+                lastDownArrowLevel3 := lastDownArrowLevel2
+                lastDownArrowLevel2 := lastDownArrowLevel1
+                lastDownArrowLevel1 := flipLevel
+
+                if not na(lastDownArrowLine1)
+                    line.delete(lastDownArrowLine1)
+                    lastDownArrowLine1 := na
+                if not na(lastDownArrowLine2)
+                    line.delete(lastDownArrowLine2)
+                    lastDownArrowLine2 := na
+                if not na(lastDownArrowLine3)
+                    line.delete(lastDownArrowLine3)
+                    lastDownArrowLine3 := na
+                if not na(lastDownArrowLine4)
+                    line.delete(lastDownArrowLine4)
+                    lastDownArrowLine4 := na
+                if not na(lastDownArrowLine5)
+                    line.delete(lastDownArrowLine5)
+                    lastDownArrowLine5 := na
+
+                if trendFlipLinesCount >= 1 and not na(lastDownArrowLevel1)
+                    lastDownArrowLine1 := line.new(x1=bar_index, y1=lastDownArrowLevel1, x2=bar_index + 500, y2=lastDownArrowLevel1, extend=extend.both, color=color.new(color.red, 10), style=line.style_solid, width=3, xloc=xloc.bar_index)
+                if trendFlipLinesCount >= 2 and not na(lastDownArrowLevel2)
+                    lastDownArrowLine2 := line.new(x1=bar_index, y1=lastDownArrowLevel2, x2=bar_index + 500, y2=lastDownArrowLevel2, extend=extend.both, color=color.new(color.red, 25), style=line.style_solid, width=3, xloc=xloc.bar_index)
+                if trendFlipLinesCount >= 3 and not na(lastDownArrowLevel3)
+                    lastDownArrowLine3 := line.new(x1=bar_index, y1=lastDownArrowLevel3, x2=bar_index + 500, y2=lastDownArrowLevel3, extend=extend.both, color=color.new(color.red, 30), style=line.style_solid, width=3, xloc=xloc.bar_index)
+                if trendFlipLinesCount >= 4 and not na(lastDownArrowLevel4)
+                    lastDownArrowLine4 := line.new(x1=bar_index, y1=lastDownArrowLevel4, x2=bar_index + 500, y2=lastDownArrowLevel4, extend=extend.both, color=color.new(color.red, 35), style=line.style_solid, width=3, xloc=xloc.bar_index)
+                if trendFlipLinesCount >= 5 and not na(lastDownArrowLevel5)
+                    lastDownArrowLine5 := line.new(x1=bar_index, y1=lastDownArrowLevel5, x2=bar_index + 500, y2=lastDownArrowLevel5, extend=extend.both, color=color.new(color.red, 40), style=line.style_solid, width=3, xloc=xloc.bar_index)
+
+        last_flip_close := close
+        prev_total_result := total_result
+        flip := false
+
+// ==========================================
+// TREND FLIP ARROWS H4: ЛОГИКА
+// ==========================================
+h4Flip = false
+var string h4Trend = na
+var float h4LastFlipClose = na
+var float h4TotalResult = na
+var float h4PrevTotalResult = na
+var float h4ExtremeOpen = na
+var float h4ExtremeClose = na
+var float h4UpSeriesTotal = 0
+var float h4DownSeriesTotal = 0
+var bool h4LastIncrease = true
+var float h4CurrentDelta = na
+
+var int h4LastArrowBar1 = na
+var float h4LastArrowPrice1 = na
+var string h4LastArrowTrend1 = na
+var int h4LastArrowBar2 = na
+var float h4LastArrowPrice2 = na
+var string h4LastArrowTrend2 = na
+var line h4LevelLine1 = na
+var line h4LevelLine2 = na
+var line h4PrevOpenLine = na
+var line h4PrevCloseLine = na
+
+if showTrendFlip
+    if na(h4LastFlipClose)
+        h4Trend := h4Close > h4Open ? "up" : "down"
+        h4LastFlipClose := h4Close
+        h4TotalResult := h4Close
+        h4PrevTotalResult := h4Close
+        h4ExtremeOpen := h4Open
+        h4ExtremeClose := h4Close
+        h4UpSeriesTotal := 0
+        h4DownSeriesTotal := 0
+        h4LastIncrease := true
+
+    if h4Trend == "up"
+        if h4Close > h4Open
+            if h4Close > h4ExtremeClose
+                h4ExtremeClose := h4Close
+                h4ExtremeOpen := h4Open
+        else
+            if h4Close < h4ExtremeOpen
+                h4Flip := true
+                h4Trend := "down"
+                h4ExtremeClose := h4Close
+                h4ExtremeOpen := h4Open
+    else
+        if h4Close < h4Open
+            if h4Close < h4ExtremeClose
+                h4ExtremeClose := h4Close
+                h4ExtremeOpen := h4Open
+        else
+            if h4Close > h4ExtremeOpen
+                h4Flip := true
+                h4Trend := "up"
+                h4ExtremeClose := h4Close
+                h4ExtremeOpen := h4Open
+
+    if h4Flip
+        h4Delta = h4Trend == "up" ? h4LastFlipClose - h4Close : -(h4LastFlipClose - h4Close)
+        h4CurrentDelta := h4Delta
+        h4TotalResult := h4TotalResult + h4Delta
+
+        if h4Delta >= 0
+            if not h4LastIncrease
+                h4UpSeriesTotal := 0
+            h4UpSeriesTotal += h4Delta
+            h4LastIncrease := true
+        else
+            if h4LastIncrease
+                h4DownSeriesTotal := 0
+            h4DownSeriesTotal += -h4Delta
+            h4LastIncrease := false
+
+        if showTrendFlip and barstate.isconfirmed
+            h4LastDirection := h4Trend == "up" ? "ВВЕРХ" : "ВНИЗ"
+            h4FirstCandleOpen := h4ExtremeOpen
+            h4LastSignalClose := h4Close
+            h4LastDirectionReason := "Trend Flip"
+
+        h4LabelColor = h4Trend == "up" ? color.new(color.red, 30) : color.new(color.green, 30)
+        barRange = high - low
+        h4OffsetDown = low - barRange * 0.8
+        h4OffsetUp = high + barRange * 0.8
+
+        h4LastArrowBar2 := h4LastArrowBar1
+        h4LastArrowPrice2 := h4LastArrowPrice1
+        h4LastArrowTrend2 := h4LastArrowTrend1
+
+        h4LastArrowBar1 := bar_index
+        h4LastArrowPrice1 := h4Close
+        h4LastArrowTrend1 := h4Trend
+
+        if not na(h4LevelLine1)
+            line.delete(h4LevelLine1)
+            h4LevelLine1 := na
+
+        if not na(h4LevelLine2)
+            line.delete(h4LevelLine2)
+            h4LevelLine2 := na
+
+        h4LastFlipClose := h4Close
+        h4PrevTotalResult := h4TotalResult
+        h4Flip := false
+
+// ==========================================
+// TREND FLIP ARROWS D1: ЛОГИКА
+// ==========================================
+d1Flip = false
+var string d1Trend = na
+var float d1LastFlipClose = na
+var float d1TotalResult = na
+var float d1PrevTotalResult = na
+var float d1ExtremeOpen = na
+var float d1ExtremeClose = na
+var float d1UpSeriesTotal = 0
+var float d1DownSeriesTotal = 0
+var bool d1LastIncrease = true
+var float d1CurrentDelta = na
+
+var int d1LastArrowBar1 = na
+var float d1LastArrowPrice1 = na
+var string d1LastArrowTrend1 = na
+var int d1LastArrowBar2 = na
+var float d1LastArrowPrice2 = na
+var string d1LastArrowTrend2 = na
+var line d1LevelLine1 = na
+var line d1LevelLine2 = na
+var line d1PrevOpenLine = na
+var line d1PrevCloseLine = na
+
+if showTrendFlip
+    if na(d1LastFlipClose)
+        d1Trend := d1Close > d1Open ? "up" : "down"
+        d1LastFlipClose := d1Close
+        d1TotalResult := d1Close
+        d1PrevTotalResult := d1Close
+        d1ExtremeOpen := d1Open
+        d1ExtremeClose := d1Close
+        d1UpSeriesTotal := 0
+        d1DownSeriesTotal := 0
+        d1LastIncrease := true
+
+    if d1Trend == "up"
+        if d1Close > d1Open
+            if d1Close > d1ExtremeClose
+                d1ExtremeClose := d1Close
+                d1ExtremeOpen := d1Open
+        else
+            if d1Close < d1ExtremeOpen
+                d1Flip := true
+                d1Trend := "down"
+                d1ExtremeClose := d1Close
+                d1ExtremeOpen := d1Open
+    else
+        if d1Close < d1Open
+            if d1Close < d1ExtremeClose
+                d1ExtremeClose := d1Close
+                d1ExtremeOpen := d1Open
+        else
+            if d1Close > d1ExtremeOpen
+                d1Flip := true
+                d1Trend := "up"
+                d1ExtremeClose := d1Close
+                d1ExtremeOpen := d1Open
+
+    if d1Flip
+        d1Delta = d1Trend == "up" ? d1LastFlipClose - d1Close : -(d1LastFlipClose - d1Close)
+        d1CurrentDelta := d1Delta
+        d1TotalResult := d1TotalResult + d1Delta
+
+        if d1Delta >= 0
+            if not d1LastIncrease
+                d1UpSeriesTotal := 0
+            d1UpSeriesTotal += d1Delta
+            d1LastIncrease := true
+        else
+            if d1LastIncrease
+                d1DownSeriesTotal := 0
+            d1DownSeriesTotal += -d1Delta
+            d1LastIncrease := false
+
+        if showTrendFlip and barstate.isconfirmed
+            d1LastDirection := d1Trend == "up" ? "ВВЕРХ" : "ВНИЗ"
+            d1FirstCandleOpen := d1ExtremeOpen
+            d1LastSignalClose := d1Close
+            d1LastDirectionReason := "Trend Flip"
+
+        d1LabelColor = d1Trend == "up" ? color.new(color.red, 30) : color.new(color.green, 30)
+        barRange = high - low
+        d1OffsetDown = low - barRange * 1.0
+        d1OffsetUp = high + barRange * 1.0
+
+        d1LastArrowBar2 := d1LastArrowBar1
+        d1LastArrowPrice2 := d1LastArrowPrice1
+        d1LastArrowTrend2 := d1LastArrowTrend1
+
+        d1LastArrowBar1 := bar_index
+        d1LastArrowPrice1 := d1Close
+        d1LastArrowTrend1 := d1Trend
+
+        if not na(d1LevelLine1)
+            line.delete(d1LevelLine1)
+            d1LevelLine1 := na
+
+        if not na(d1LevelLine2)
+            line.delete(d1LevelLine2)
+            d1LevelLine2 := na
+
+        d1LastFlipClose := d1Close
+        d1PrevTotalResult := d1TotalResult
+        d1Flip := false
+
+// ==========================================
+// ВЫВОД ТЕКУЩЕГО НАПРАВЛЕНИЯ СВЕРХУ СЛЕВА
+// ==========================================
+var table directionTable = table.new(position.top_left, 2, 4, bgcolor=color.new(color.black, 20), border_width=2)
+
+if barstate.isconfirmed and not na(lastDirection)
+    directionColor = lastDirection == "ВВЕРХ" ? color.green : color.red
+    table.cell(directionTable, 0, 0, lastDirection, text_color=color.white, bgcolor=directionColor, text_size=size.huge, text_halign=text.align_center)
+
+    tfSeconds = timeframe.in_seconds()
+    barStartTime = time / 1000
+    barEndTime = barStartTime + tfSeconds
+    currentTime = timenow / 1000
+    timeLeft = math.max(0, barEndTime - currentTime)
+    string timeLeftText = na
+
+    if tfSeconds < 60
+        timeLeftText := str.tostring(math.round(timeLeft), "#") + " сек"
+    else if tfSeconds < 3600
+        minutesLeft = math.floor(timeLeft / 60)
+        secondsLeft = math.round(timeLeft % 60)
+        timeLeftText := str.tostring(minutesLeft, "#") + ":" + (secondsLeft < 10 ? "0" : "") + str.tostring(secondsLeft, "#")
+    else
+        hoursLeft = math.floor(timeLeft / 3600)
+        minutesLeft = math.floor((timeLeft % 3600) / 60)
+        secondsLeft = math.round((timeLeft % 3600) % 60)
+        timeLeftText := str.tostring(hoursLeft, "#") + ":" + (minutesLeft < 10 ? "0" : "") + str.tostring(minutesLeft, "#") + ":" + (secondsLeft < 10 ? "0" : "") + str.tostring(secondsLeft, "#")
+
+    timeLeftBgColor = timeLeft < 60 ? (math.round(timeLeft) % 2 == 0 ? color.new(color.red, 20) : color.new(color.black, 40)) : color.new(color.black, 40)
+    table.cell(directionTable, 1, 0, timeLeftText, text_color=color.white, bgcolor=timeLeftBgColor, text_size=size.normal, text_halign=text.align_center)
+
+    currentTf = timeframe.period
+
+    if not na(lastSignalClose)
+        currentPrice = close
+        priceDiff = currentPrice - lastSignalClose
+
+        if lastDirection == "ВНИЗ"
+            priceDiff := -priceDiff
+
+        formulaText = str.tostring(currentPrice, "#.##") + " - " + str.tostring(lastSignalClose, "#.##") + " = " + str.tostring(priceDiff, "#.##")
+        table.cell(directionTable, 0, 2, formulaText, text_color=color.yellow, bgcolor=color.new(color.black, 50), text_size=size.small, text_halign=text.align_center)
+        table.cell(directionTable, 1, 2, str.tostring(currentPrice, "#.##") + " (разница: " + str.tostring(priceDiff, "#.##") + ")", text_color=color.white, bgcolor=color.new(color.black, 40), text_size=size.small, text_halign=text.align_center)
+
+        if not na(firstCandleOpen)
+            table.cell(directionTable, 0, 3, "Цена разворота: " + str.tostring(firstCandleOpen, "#.##"), text_color=color.aqua, bgcolor=color.new(color.black, 40), text_size=size.small, text_halign=text.align_center)
+
+        if priceDiff > 3500 or priceDiff < -1000
+            table.cell(directionTable, 1, 1, "⚠️ Возможен разворот", text_color=color.yellow, bgcolor=color.new(color.red, 20), text_size=size.small, text_halign=text.align_center)
+        else
+            table.cell(directionTable, 1, 1, currentTf, text_color=color.white, bgcolor=color.new(color.black, 40), text_size=size.normal, text_halign=text.align_center)
+    else
+        table.cell(directionTable, 1, 1, currentTf, text_color=color.white, bgcolor=color.new(color.black, 40), text_size=size.normal, text_halign=text.align_center)
+
+    table.cell(directionTable, 0, 1, "Порог: +3500 / -1000", text_color=color.white, bgcolor=color.new(color.black, 40), text_size=size.small, text_halign=text.align_center)
