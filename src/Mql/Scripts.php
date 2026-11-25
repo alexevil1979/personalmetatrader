@@ -25,7 +25,7 @@ final class Scripts
     }
 
     /** MetaEditor often saves UTF-16LE with BOM; normalise to UTF-8 and reject binary junk. */
-    public static function normalizeSource(string $s): string
+    public static function normalizeSource(string $s, string $lang = 'mq5'): string
     {
         if (str_starts_with($s, "\xFF\xFE")) {
             $s = mb_convert_encoding(substr($s, 2), 'UTF-8', 'UTF-16LE');
@@ -38,7 +38,11 @@ final class Scripts
         if (str_contains($s, "\0") || !mb_check_encoding($s, 'UTF-8')) {
             throw new InvalidArgumentException('Это не текстовый исходник MQL (бинарное или не UTF-8/UTF-16 содержимое)');
         }
-        if (!preg_match('/\b(OnCalculate|OnInit|start|init|OnStart)\s*\(/', $s)) {
+        if ($lang === 'pine') {
+            if (!preg_match('/^\s*(\/\/\s*@version\s*=|indicator\s*\()/m', $s)) {
+                throw new InvalidArgumentException('Это не Pine Script: нет //@version=5 и вызова indicator(...)');
+            }
+        } elseif (!preg_match('/\b(OnCalculate|OnInit|start|init|OnStart)\s*\(/', $s)) {
             throw new InvalidArgumentException('В файле не найдено ни одной функции OnInit/OnCalculate/start');
         }
         return $s;
@@ -49,7 +53,7 @@ final class Scripts
         $st = Db::pdo()->prepare('SELECT id, kind, lang, name, description, current_version AS version, created_at FROM custom_scripts WHERE user_id=? ORDER BY id DESC');
         $st->execute([$uid]);
         return array_map(static function ($r) {
-            $r['supported'] = in_array($r['lang'], ['mq4', 'mq5'], true);
+            $r['supported'] = in_array($r['lang'], ['mq4', 'mq5', 'pine'], true);
             return $r;
         }, $st->fetchAll());
     }
@@ -77,7 +81,7 @@ final class Scripts
     public static function create(int $uid, string $name, string $lang, ?string $source, ?string $binB64): array
     {
         $name = trim(mb_substr($name, 0, 120));
-        if ($name === '' || !in_array($lang, ['mq4', 'mq5', 'ex4', 'ex5'], true)) {
+        if ($name === '' || !in_array($lang, ['mq4', 'mq5', 'ex4', 'ex5', 'pine'], true)) {
             throw new InvalidArgumentException('bad name or language');
         }
         $pdo = Db::pdo();
@@ -91,7 +95,7 @@ final class Scripts
             }
             $desc = 'Скомпилированный бинарник: хранится, но не исполняется (см. docs/MQL.md)';
         } else {
-            $data = self::normalizeSource((string) $source);
+            $data = self::normalizeSource((string) $source, $lang);
             $desc = null;
         }
         $pdo->prepare("INSERT INTO custom_scripts (user_id, kind, lang, name, description, current_version) VALUES (?, 'indicator', ?, ?, ?, 1)")->execute([$uid, $lang, $name, $desc]);
@@ -107,7 +111,7 @@ final class Scripts
         $st = Db::pdo()->prepare('SELECT version, size_bytes, sha256, created_at FROM script_versions WHERE script_id=? ORDER BY version DESC');
         $st->execute([$id]);
         $versions = $st->fetchAll();
-        $out = ['id' => $id, 'name' => $r['name'], 'lang' => $r['lang'], 'version' => (int) $r['current_version'], 'versions' => $versions, 'supported' => in_array($r['lang'], ['mq4', 'mq5'], true)];
+        $out = ['id' => $id, 'name' => $r['name'], 'lang' => $r['lang'], 'version' => (int) $r['current_version'], 'versions' => $versions, 'supported' => in_array($r['lang'], ['mq4', 'mq5', 'pine'], true)];
         if ($out['supported']) {
             $out['source'] = self::source($uid, $id, $r['lang'], (int) $r['current_version']);
         }
@@ -129,10 +133,10 @@ final class Scripts
     public static function update(int $uid, int $id, string $source, ?string $name): array
     {
         $r = self::row($uid, $id);
-        if (!in_array($r['lang'], ['mq4', 'mq5'], true)) {
+        if (!in_array($r['lang'], ['mq4', 'mq5', 'pine'], true)) {
             throw new InvalidArgumentException('Бинарные файлы не редактируются');
         }
-        $data = self::normalizeSource($source);
+        $data = self::normalizeSource($source, $r['lang']);
         $ver = (int) $r['current_version'] + 1;
         self::saveVersion($uid, $id, $r['lang'], $ver, $data);
         Db::pdo()->prepare('UPDATE custom_scripts SET current_version=?, name=COALESCE(?, name) WHERE id=?')->execute([$ver, $name ? mb_substr(trim($name), 0, 120) : null, $id]);
@@ -174,7 +178,7 @@ final class Scripts
     public static function describe(int $uid, int $id): array
     {
         $r = self::row($uid, $id);
-        if (!in_array($r['lang'], ['mq4', 'mq5'], true)) {
+        if (!in_array($r['lang'], ['mq4', 'mq5', 'pine'], true)) {
             return ['ok' => false, 'error' => 'EX4/EX5 не исполняются: нужна среда MetaTrader (см. docs/MQL.md)', 'kind' => 'unsupported'];
         }
         return self::exec(['mode' => 'describe', 'lang' => $r['lang'], 'source' => self::source($uid, $id, $r['lang'], (int) $r['current_version'])]);
@@ -183,7 +187,7 @@ final class Scripts
     public static function run(int $uid, int $id, string $cat, string $sym, string $tf, array $inputs, int $limit, ?int $ver = null): array
     {
         $r = self::row($uid, $id);
-        if (!in_array($r['lang'], ['mq4', 'mq5'], true)) {
+        if (!in_array($r['lang'], ['mq4', 'mq5', 'pine'], true)) {
             return ['ok' => false, 'error' => 'EX4/EX5 не исполняются: нужна среда MetaTrader (см. docs/MQL.md)', 'kind' => 'unsupported'];
         }
         $limit = max(50, min(3000, $limit));
@@ -191,9 +195,31 @@ final class Scripts
         $info = Db::pdo()->prepare('SELECT price_scale, tick_size FROM trading_symbols WHERE exchange_id=1 AND category=? AND symbol=?');
         $info->execute([$cat, $sym]);
         $si = $info->fetch() ?: ['price_scale' => 2, 'tick_size' => 0.01];
+        $source = self::source($uid, $id, $r['lang'], $ver ?? (int) $r['current_version']);
+        $extra = [];
+        if ($r['lang'] === 'pine') { // request.security(): fetch the higher-timeframe candles the script asks for
+            $d = self::exec(['mode' => 'describe', 'lang' => 'pine', 'source' => $source]);
+            if (!($d['ok'] ?? false)) {
+                return $d;
+            }
+            $mainSec = (self::PERIOD_MIN[$tf] ?? 60) * 60;
+            foreach ($d['info']['securityTfs'] ?? [] as $stf) {
+                if (!array_key_exists((string) $stf, Market::TF) || (string) $stf === $tf) {
+                    if ((string) $stf !== $tf) {
+                        return ['ok' => false, 'error' => 'request.security: таймфрейм "' . $stf . '" не поддерживается', 'kind' => 'mql'];
+                    }
+                    continue;
+                }
+                $sec = ((self::PERIOD_MIN[(string) $stf] ?? 60)) * 60;
+                if ($sec < $mainSec) {
+                    return ['ok' => false, 'error' => 'request.security: таймфрейм "' . $stf . '" ниже таймфрейма графика — не поддерживается', 'kind' => 'mql'];
+                }
+                $extra[(string) $stf] = Market::candlesN($cat, $sym, (string) $stf, min(1500, (int) ceil($limit * $mainSec / $sec) + 10));
+            }
+        }
         $t0 = microtime(true);
         $res = self::exec([
-            'mode' => 'run', 'lang' => $r['lang'], 'source' => self::source($uid, $id, $r['lang'], $ver ?? (int) $r['current_version']),
+            'mode' => 'run', 'lang' => $r['lang'], 'source' => $source, 'extra' => (object) $extra,
             'candles' => $candles, 'inputs' => (object) $inputs, 'symbol' => $sym, 'periodMin' => self::PERIOD_MIN[$tf] ?? 60,
             'digits' => (int) $si['price_scale'], 'point' => (float) $si['tick_size'],
         ]);

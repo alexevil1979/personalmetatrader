@@ -5,6 +5,7 @@ SRC=/ssd/www/personalmetatrader
 id pmtmql >/dev/null 2>&1 || useradd -r -M -d /nonexistent -s /usr/sbin/nologin pmtmql
 mkdir -p /opt/pmt-mql
 cp "$SRC"/mql/*.js /opt/pmt-mql/
+mkdir -p /opt/pmt-mql/pine && cp "$SRC"/pine/*.js /opt/pmt-mql/pine/
 cp "$SRC"/public/assets/indicators.js /opt/pmt-mql/indicators.js
 chown -R root:root /opt/pmt-mql && chmod -R go-w /opt/pmt-mql
 if [ ! -f /etc/pmt-mql.env ]; then

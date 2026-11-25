@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS custom_scripts (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id INT UNSIGNED NOT NULL,
   kind ENUM('indicator','script','strategy') NOT NULL DEFAULT 'indicator',
-  lang ENUM('mq4','mq5','ex4','ex5','js') NOT NULL,
+  lang ENUM('mq4','mq5','ex4','ex5','js','pine') NOT NULL,
   name VARCHAR(120) NOT NULL,
   description VARCHAR(500) NULL,
   current_version INT UNSIGNED NOT NULL DEFAULT 1,
@@ -240,3 +240,6 @@ CREATE TABLE IF NOT EXISTS system_logs (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY ix_chan (channel, created_at)
 ) ENGINE=InnoDB;
+
+-- migration: Pine Script support (idempotent)
+ALTER TABLE custom_scripts MODIFY lang ENUM('mq4','mq5','ex4','ex5','js','pine') NOT NULL;

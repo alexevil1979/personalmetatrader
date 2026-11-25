@@ -8,7 +8,7 @@ const sanitize = (v) => (typeof v === 'number' && !Number.isFinite(v) ? null : v
 
 function describe(source) {
   const { meta } = generate(source);
-  return { ok: true, info: { lang: 'pine', version: meta.version, securityTfs: meta.securityTfs } };
+  return { ok: true, info: { lang: 'pine', version: meta.version, securityTfs: meta.securityTfs, title: meta.indicator && meta.indicator.title, window: meta.indicator && meta.indicator.overlay ? 'chart' : 'separate', inputs: meta.inputs, description: '', copyright: '' }, logs: [] };
 }
 
 function run(req) {
@@ -30,7 +30,7 @@ function run(req) {
   const seen = new Set(); const inputs = P.inputs.filter((x) => (seen.has(x.name) ? false : seen.add(x.name)));
   return {
     ok: true, bars: n, times: env.candles.map((c) => c.time),
-    info: { lang: 'pine', title: P.ind.title, overlay: P.ind.overlay, inputs, securityTfs: meta.securityTfs, version: meta.version },
+    info: { lang: 'pine', title: P.ind.title, overlay: P.ind.overlay, window: P.ind.overlay ? 'chart' : 'separate', inputs: meta.inputs, securityTfs: meta.securityTfs, version: meta.version },
     plots, shapes: o.shapes, bg: Array.from({ length: n }, (_, i) => o.bg[i] || null), hlines: o.hlines.map(({ site, ...r }) => r),
     labels: o.labels.filter((l) => !l.deleted).map(({ deleted, ...r }) => r), lines: o.lines.filter((l) => !l.deleted).map(({ deleted, ...r }) => r),
     tables: o.tables.filter((t) => !t.deleted).map((t) => ({ position: t.position, columns: t.columns, rows: t.rows, bgcolor: t.bgcolor, border: t.border, borderWidth: t.borderWidth, cells: Object.values(t.cells) })), logs: P.logs,

@@ -22,7 +22,11 @@ function parseColor(v) {
 }
 function parseDraw(v) { if (v === undefined) return undefined; return RT.CONSTS[v] !== undefined ? RT.CONSTS[v] : /^\d+$/.test(v) ? +v : undefined; }
 
+let pineEngine = null;
+function loadPine() { if (!pineEngine) { try { pineEngine = require('./pine/engine'); } catch { pineEngine = require('../pine/engine'); } } return pineEngine; }
+
 function run(req) {
+  if (req.lang === 'pine') { const E = loadPine(); return req.mode === 'describe' ? E.describe(String(req.source)) : E.run(req); }
   const lang = req.lang === 'mq4' ? 'mq4' : 'mq5';
   const { js, meta } = compile(String(req.source), lang);
   const candles = req.mode === 'describe' ? [] : req.candles;
@@ -100,7 +104,7 @@ process.stdin.on('data', (c) => { buf += c; if (buf.length > 40e6) process.exit(
 process.stdin.on('end', () => {
   let out;
   try { out = run(JSON.parse(buf)); } catch (e) {
-    out = { ok: false, error: String(e && e.message ? e.message : e).slice(0, 500), line: e && e.line ? e.line : null, kind: e instanceof MqlError ? 'mql' : 'internal' };
+    out = { ok: false, error: String(e && e.message ? e.message : e).slice(0, 500), line: e && e.line ? e.line : null, kind: (e instanceof MqlError || e.name === 'PineError') ? 'mql' : 'internal' };
   }
   process.stdout.write(JSON.stringify(out, (k, v) => (typeof v === 'number' && !Number.isFinite(v) ? null : v)));
 });
