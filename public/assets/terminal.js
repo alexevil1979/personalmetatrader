@@ -185,7 +185,7 @@
       this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div>';
       host.appendChild(this.el);
       this.cv = this.el.querySelector('.cv'); this.legend = this.el.querySelector('.ohlc'); this.loadEl = this.el.querySelector('.load');
-      this.dw = new PMTDraw.Drawings(this, drawHooks);
+      this.dw = new PMTDraw.Drawings(this, drawHooks); this.pov = new PMTPineView.Overlay(this);
       this.chart = LightweightCharts.createChart(this.cv, { autoSize: true, crosshair: { mode: 0 }, timeScale: { timeVisible: true, rightOffset: 8 } });
       this.onReopen = () => this.refreshLatest();
       this.onMsg = (m) => this.live(m);
@@ -219,7 +219,7 @@
       if (ty === 'line') this.main = this.chart.addSeries(LC.LineSeries, { color: '#2962ff', lineWidth: 2, priceFormat: pf });
       else if (ty === 'bars') this.main = this.chart.addSeries(LC.BarSeries, { upColor: t.up, downColor: t.dn, priceFormat: pf });
       else this.main = this.chart.addSeries(LC.CandlestickSeries, { upColor: t.up, downColor: t.dn, borderUpColor: t.up, borderDownColor: t.dn, wickUpColor: t.up, wickDownColor: t.dn, priceFormat: pf });
-      this.dw.attach();
+      this.dw.attach(); this.pov.attach();
       this.vol = this.chart.addSeries(LC.HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' }, 0);
       this.vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       this.render();
@@ -293,7 +293,7 @@
     // ---------- indicators ----------
     clearIndicators() {
       for (const it of this.ind) { Object.values(it.series).forEach((x) => { try { this.chart.removeSeries(x); } catch { /* gone */ } }); it.lv.forEach((x) => { try { this.chart.removeSeries(x); } catch { /* gone */ } }); }
-      this.ind = []; if (this.mk) this.mk.setMarkers([]);
+      this.ind = []; this.pov.clear(); if (this.mk) this.mk.setMarkers([]);
     }
     scheduleInd(newBar) {
       if (!this.cfg.indicators.length) return;
@@ -311,7 +311,7 @@
       let paneIdx = 0; const markers = [];
       for (const inst of this.cfg.indicators) {
         if (inst.visible === false) continue;
-        if (inst.type === 'mql') { const r = this.mqlItem(inst, full, paneIdx); if (r === 'sep') paneIdx++; continue; }
+        if (inst.type === 'mql') { const r = this.mqlItem(inst, full, paneIdx, markers); if (r === 'sep') paneIdx++; continue; }
         const def = PMTInd.REG[inst.type]; if (!def) continue;
         let it = this.ind.find((x) => x.inst === inst);
         if (!it) { if (!def.overlay) paneIdx++; it = { inst, pane: def.overlay ? 0 : paneIdx, series: {}, lv: [], out: null }; this.ind.push(it); this.buildItem(it, def); } else if (!def.overlay) paneIdx = Math.max(paneIdx, it.pane);
@@ -358,7 +358,7 @@
       st.key = key; st.busy = false;
       if (this.main) this.refreshIndicators(true);
     }
-    mqlItem(inst, full, paneIdx) {
+    mqlItem(inst, full, paneIdx, markers) {
       const st = this.mqlSt(inst), res = st.res, sep = res && res.info.window === 'separate';
       if (st.key !== this.mqlKey(inst)) this.runMql(inst, false);
       if (!res) return null;
@@ -367,14 +367,17 @@
       const LC = LightweightCharts, pane = sep ? paneIdx + 1 : 0, times = res.times, n = times.length;
       const step = n > 1 ? times[n - 1] - times[n - 2] : 3600, tm = (i) => (i < n ? times[i] : times[n - 1] + (i - n + 1) * step);
       it = { inst, pane, series: {}, lv: [], out: null, mql: true, res }; this.ind.push(it);
+      const pine = res.info.lang === 'pine';
+      if (pine) { this.pov.set(inst.uid, res); (res.shapes || []).forEach((sh) => { const up = sh.location === 'abovebar' || sh.location === 'top'; markers.push({ time: res.times[sh.bar], position: up ? 'aboveBar' : 'belowBar', shape: ({ triangleup: 'arrowUp', arrowup: 'arrowUp', labelup: 'arrowUp', flag: 'arrowUp', triangledown: 'arrowDown', arrowdown: 'arrowDown', labeldown: 'arrowDown', square: 'square' })[sh.style] || 'circle', color: sh.color, text: String(sh.text || '') }); }); }
       res.plots.forEach((pl, k) => {
-        const base = { color: pl.color, lineWidth: Math.max(1, pl.width), priceLineVisible: false, lastValueVisible: !!sep, title: '', lineStyle: [0, 2, 1, 3, 3][pl.style] ?? 0 };
+        if (pine) { pl = { ...pl, draw: ({ histogram: 'hist', columns: 'hist', circles: 'arrow', cross: 'arrow' })[pl.style] || 'line', shift: pl.offset || 0, style: 0 }; }
+        const base = { color: pl.color, lineWidth: Math.max(1, pl.width), priceLineVisible: false, lastValueVisible: !!sep, title: pine ? pl.title : '', lineStyle: [0, 2, 1, 3, 3][pl.style] ?? 0 };
         let s2;
         if (pl.draw === 'hist') s2 = this.chart.addSeries(LC.HistogramSeries, { color: pl.color, priceLineVisible: false, lastValueVisible: false }, pane);
         else if (pl.draw === 'arrow') s2 = this.chart.addSeries(LC.LineSeries, { ...base, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 3 }, pane);
         else s2 = this.chart.addSeries(LC.LineSeries, base, pane);
         const data = [];
-        for (let i = 0; i < n; i++) { const j = i + (pl.shift || 0); if (j < 0) continue; const v = pl.values[i]; if (v === null) { if (pl.draw !== 'section') data.push({ time: tm(j) }); } else data.push({ time: tm(j), value: v }); }
+        for (let i = 0; i < n; i++) { const j = i + (pl.shift || 0); if (j < 0) continue; const v = pl.values[i]; if (v === null) { if (pl.draw !== 'section') data.push({ time: tm(j) }); } else { const pt = { time: tm(j), value: v }; if (pl.colors && pl.colors[i]) pt.color = pl.colors[i]; data.push(pt); } }
         s2.setData(data); it.series['p' + k] = s2;
         if (k === 0) {
           (res.info.levels || []).forEach((lv) => s2.createPriceLine({ price: lv, color: '#7d8590', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: '' }));
@@ -403,7 +406,7 @@
         const st = this.mqlSt(inst), it = this.ind.find((x) => x.inst === inst);
         let vals = '';
         if (it) { const idx = it.res.times.indexOf(time) >= 0 ? it.res.times.indexOf(time) : it.res.times.length - 1; vals = it.res.plots.map((pl) => { const v = pl.values[idx]; return v === null || v === undefined ? '' : `<span style="color:${pl.color}">${Math.abs(v) >= 100 ? v.toFixed(2) : v.toPrecision(5)}</span>`; }).join(' '); }
-        html += `<br><span style="color:var(--mut)">${inst.name}${it && it.res.info.short ? ' · ' + it.res.info.short : ''}</span> ${vals}${st.err ? ` <span class="dn">${String(st.err).replace(/</g, '&lt;')}</span>` : !it ? ' <span style="color:var(--mut)">…</span>' : ''}`;
+        html += `<br><span style="color:var(--mut)">${inst.name}${it && it.res.info.short ? ' · ' + it.res.info.short : ''}${it && it.res.info.lang === 'pine' ? ' · pine' : ''}</span> ${vals}${st.err ? ` <span class="dn">${String(st.err).replace(/</g, '&lt;')}</span>` : !it ? ' <span style="color:var(--mut)">…</span>' : ''}`;
       }
       for (const it of this.ind) {
         if (it.mql) continue;
@@ -567,6 +570,17 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
    return(rates_total);
 }
 `;
+  const PINE_TEMPLATE = `//@version=5
+indicator("My SMA + signals", overlay=true)
+len = input.int(20, "Length", minval=1)
+showLabels = input.bool(true, "Show labels")
+ma = ta.sma(close, len)
+plot(ma, "SMA", color=color.orange, linewidth=2)
+if showLabels and ta.crossover(close, ma)
+    label.new(bar_index, low, "UP", style=label.style_label_up, color=color.green, textcolor=color.white, yloc=yloc.belowbar)
+if showLabels and ta.crossunder(close, ma)
+    label.new(bar_index, high, "DOWN", style=label.style_label_down, color=color.red, textcolor=color.white, yloc=yloc.abovebar)
+`;
   let mqlSel = null, mqlInfo = null;
   const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const mqlMsg = (t, bad) => { const el = $('#mqlMsg'); el.textContent = t || ''; el.className = bad ? 'dn' : 'up'; };
@@ -590,7 +604,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
     if (!d.ok) { mqlInfo = null; $('#mqlInputs').innerHTML = `<div class="dn">Ошибка: ${esc(d.error)}${d.line ? ` (строка ${d.line})` : ''}</div>`; return; }
     mqlInfo = d.info;
     $('#mqlInputs').innerHTML = `<div style="color:var(--mut)">${esc(d.info.lang.toUpperCase())} · окно: ${d.info.window === 'separate' ? 'отдельное' : 'основной график'}${d.info.description ? ' · ' + esc(d.info.description) : ''}${d.info.copyright ? ' · © ' + esc(d.info.copyright) : ''}</div>` +
-      (d.info.inputs.length ? d.info.inputs.map((q) => `<label>${esc(q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" data-in="${esc(q.name)}" data-k="${q.kind}" value="${esc(q.default)}"></label>`).join('') : '<span style="color:var(--mut)">Входных параметров нет.</span>');
+      (d.info.inputs.length ? d.info.inputs.map((q) => (q.kind === 'bool' ? `<label>${esc(q.title || q.name)} <input type="checkbox" data-in="${esc(q.name)}" data-k="bool" ${q.default ? 'checked' : ''}></label>` : `<label>${esc(q.title || q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" data-in="${esc(q.name)}" data-k="${q.kind}" value="${esc(q.default)}"></label>`)).join('') : '<span style="color:var(--mut)">Входных параметров нет.</span>');
     (d.logs || []).length && ($('#mqlInputs').innerHTML += `<pre>${esc(d.logs.join('\n'))}</pre>`);
   }
   function wireMql() {
@@ -600,7 +614,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
     $('#mqlList').onclick = (e) => { const r = e.target.closest('.mrow'); if (r) mqlSelect(+r.dataset.id).catch((x) => mqlMsg(x.message, true)); };
     $('#mqlFile').onchange = async (e) => {
       const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-      const ext = (f.name.split('.').pop() || '').toLowerCase(); if (!['mq4', 'mq5', 'ex4', 'ex5'].includes(ext)) { mqlMsg('Допустимы только .mq4 .mq5 .ex4 .ex5', true); return; }
+      const ext = (f.name.split('.').pop() || '').toLowerCase(); if (!['mq4', 'mq5', 'ex4', 'ex5', 'pine'].includes(ext)) { mqlMsg('Допустимы только .mq4 .mq5 .ex4 .ex5 .pine', true); return; }
       if (f.size > 2097152) { mqlMsg('Файл слишком большой', true); return; }
       try {
         const buf = new Uint8Array(await f.arrayBuffer()); let body;
@@ -610,6 +624,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
       } catch (x) { mqlMsg(x.message, true); }
     };
     $('#mqlNew').onclick = async () => { try { const j = await call('POST', 'mql/scripts', null, { name: 'Новый индикатор', lang: 'mq5', source: MQL_TEMPLATE }); await mqlRefresh(j.id); } catch (x) { mqlMsg(x.message, true); } };
+    $('#mqlNewPine').onclick = async () => { try { const j = await call('POST', 'mql/scripts', null, { name: 'Новый Pine', lang: 'pine', source: PINE_TEMPLATE }); await mqlRefresh(j.id); } catch (x) { mqlMsg(x.message, true); } };
     $('#mqlSave').onclick = async () => {
       try { await call('PUT', 'mql/scripts/' + mqlSel.id, null, { source: $('#mqlSrc').value, name: $('#mqlName').value }); mqlMsg('Сохранена новая версия'); await mqlRefresh(mqlSel.id); } catch (x) { mqlMsg(x.message, true); }
     };
@@ -622,7 +637,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
     };
     $('#mqlRun').onclick = async () => {
       if (!mqlInfo) await mqlDescribe(); if (!mqlInfo) { mqlMsg('Скрипт не компилируется — см. ошибку выше', true); return; }
-      const params = {}; document.querySelectorAll('#mqlInputs [data-in]').forEach((i) => { params[i.dataset.in] = i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
+      const params = {}; document.querySelectorAll('#mqlInputs [data-in]').forEach((i) => { params[i.dataset.in] = i.dataset.k === 'bool' ? i.checked : i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
       const p = panes[active];
       p.cfg.indicators.push({ uid: Date.now() + '' + Math.floor(Math.random() * 1000), type: 'mql', scriptId: mqlSel.id, name: $('#mqlName').value || mqlSel.name, params, meta: { inputs: mqlInfo.inputs }, visible: true });
       save(); p.refreshIndicators(true); mqlMsg('Добавлено на график: окно ' + (active + 1));
@@ -640,7 +655,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
     const t = tplAll(); $('#tplSel').innerHTML = '<option value="">— шаблон —</option>' + Object.keys(t).map((k) => `<option>${k.replace(/</g, '&lt;')}</option>`).join('');
     $('#indList').innerHTML = p.cfg.indicators.map((inst) => {
       if (inst.type === 'mql') {
-        const ps = (inst.meta && inst.meta.inputs || []).map((q) => `<label>${q.name} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" value="${String(inst.params[q.name] ?? q.default).replace(/"/g, '&quot;')}" data-u="${inst.uid}" data-mp="${q.name}" data-k="${q.kind}"></label>`).join('');
+        const ps = (inst.meta && inst.meta.inputs || []).map((q) => { const cur = inst.params[q.name] ?? q.default; return q.kind === 'bool' ? `<label>${esc(q.title || q.name)} <input type="checkbox" ${cur ? 'checked' : ''} data-u="${inst.uid}" data-mp="${q.name}" data-k="bool"></label>` : `<label>${esc(q.title || q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" value="${String(cur).replace(/"/g, '&quot;')}" data-u="${inst.uid}" data-mp="${q.name}" data-k="${q.kind}"></label>`; }).join('');
         return `<div class="card"><div class="h"><input type="checkbox" data-u="${inst.uid}" data-vis ${inst.visible !== false ? 'checked' : ''}><span>MQL: ${inst.name}</span><span class="grow"></span><button data-u="${inst.uid}" data-del>Удалить</button></div><div>${ps}</div></div>`;
       }
       const d = PMTInd.REG[inst.type];
@@ -655,7 +670,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
   function indEvent(e) {
     const el = e.target, u = el.dataset && el.dataset.u; if (!u) return;
     const p = panes[active], inst = p.cfg.indicators.find((x) => x.uid === u); if (!inst) return;
-    if (el.dataset.mp) { inst.params[el.dataset.mp] = el.dataset.k === 'string' ? el.value : parseFloat(el.value); }
+    if (el.dataset.mp) { inst.params[el.dataset.mp] = el.dataset.k === 'bool' ? el.checked : el.dataset.k === 'string' ? el.value : parseFloat(el.value); }
     else if (el.dataset.p) { const q = PMTInd.REG[inst.type].params.find((x) => x.k === el.dataset.p); inst.params[q.k] = q.type === 'select' ? el.value : Math.max(q.min || 0, parseFloat(el.value) || q.def); }
     else if (el.dataset.c !== undefined && el.dataset.c !== '') { (inst.style.colors = inst.style.colors || {})[el.dataset.c] = el.value; }
     else if ('w' in el.dataset) inst.style.width = Math.min(5, Math.max(1, parseInt(el.value, 10) || 1));
