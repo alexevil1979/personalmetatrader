@@ -72,4 +72,9 @@ if (str_starts_with($path, '/api/')) {
 }
 
 header('Content-Type: text/html; charset=utf-8');
-readfile(dirname(__DIR__) . '/resources/terminal.html');
+$html = (string) file_get_contents(dirname(__DIR__) . '/resources/terminal.html');
+// cache-busting by file mtime
+echo preg_replace_callback('#(/assets/[\w./-]+\.(?:js|css))"#', static function (array $m): string {
+    $f = __DIR__ . $m[1];
+    return $m[1] . '?v=' . (is_file($f) ? filemtime($f) : 0) . '"';
+}, $html);

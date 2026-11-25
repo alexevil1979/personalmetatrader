@@ -94,7 +94,7 @@
   // ---------- Chart pane ----------
   class Pane {
     constructor(host, cfg) {
-      this.cfg = cfg; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
+      this.cfg = cfg; if (!cfg.indicators) cfg.indicators = []; this.ind = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
       this.el = document.createElement('div'); this.el.className = 'pane';
       this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div>';
       host.appendChild(this.el);
@@ -123,14 +123,16 @@
     }
     buildSeries() {
       const t = chartTheme();
-      if (this.main) { this.chart.removeSeries(this.main); this.chart.removeSeries(this.vol); }
+      this.mk = null;
+      if (this.main) { this.clearIndicators(); this.chart.removeSeries(this.main); this.chart.removeSeries(this.vol); }
       const info = symInfo(this.cfg.category, this.cfg.symbol);
       const pf = info ? { type: 'price', precision: +info.scale, minMove: +info.tick } : { type: 'price', precision: 2, minMove: 0.01 };
       const ty = this.cfg.type;
-      if (ty === 'line') this.main = this.chart.addLineSeries({ color: '#2962ff', lineWidth: 2, priceFormat: pf });
-      else if (ty === 'bars') this.main = this.chart.addBarSeries({ upColor: t.up, downColor: t.dn, priceFormat: pf });
-      else this.main = this.chart.addCandlestickSeries({ upColor: t.up, downColor: t.dn, borderUpColor: t.up, borderDownColor: t.dn, wickUpColor: t.up, wickDownColor: t.dn, priceFormat: pf });
-      this.vol = this.chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' });
+      const LC = LightweightCharts;
+      if (ty === 'line') this.main = this.chart.addSeries(LC.LineSeries, { color: '#2962ff', lineWidth: 2, priceFormat: pf });
+      else if (ty === 'bars') this.main = this.chart.addSeries(LC.BarSeries, { upColor: t.up, downColor: t.dn, priceFormat: pf });
+      else this.main = this.chart.addSeries(LC.CandlestickSeries, { upColor: t.up, downColor: t.dn, borderUpColor: t.up, borderDownColor: t.dn, wickUpColor: t.up, wickDownColor: t.dn, priceFormat: pf });
+      this.vol = this.chart.addSeries(LC.HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' }, 0);
       this.vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       this.render();
     }
@@ -140,7 +142,7 @@
       return c;
     }
     volData(c) { const t = chartTheme(); return c.map((k) => ({ time: k.time, value: k.volume, color: (k.close >= k.open ? t.up : t.dn) + '66' })); }
-    render() { this.main.setData(this.series(this.candles)); this.vol.setData(this.volData(this.candles)); }
+    render() { this.main.setData(this.series(this.candles)); this.vol.setData(this.volData(this.candles)); this.refreshIndicators(true); }
     async load() {
       this.unsubscribe(); this.candles = []; this.exhausted = false; this.loadEl.textContent = 'загрузка…';
       const token = this.token = (this.token || 0) + 1;
@@ -165,6 +167,7 @@
         if (last && c.time === last.time) this.candles[this.candles.length - 1] = c; else this.candles.push(c); // no duplicates
         const s = this.series(this.candles); this.main.update(s[s.length - 1]);
         this.vol.update(this.volData([c])[0]);
+        this.scheduleInd(!last || c.time !== last.time);
       }
     }
     async refreshLatest() { // after WS reconnect: fill any gap, dedupe by time
@@ -197,7 +200,91 @@
       if (!k) { this.legend.textContent = ''; return; }
       const d = k.close - k.open, cls = d >= 0 ? 'up' : 'dn';
       this.legend.innerHTML = `<b>${this.cfg.symbol}</b> ${TFS.find((t) => t[0] === this.cfg.tf)[1]} &nbsp; O ${k.open} H ${k.high} L ${k.low} C <span class="${cls}">${k.close}</span> V ${k.volume.toFixed(2)}`;
+      this.legend.innerHTML += this.indLegend(k.time);
     }
+    // ---------- indicators ----------
+    clearIndicators() {
+      for (const it of this.ind) { Object.values(it.series).forEach((x) => { try { this.chart.removeSeries(x); } catch { /* gone */ } }); it.lv.forEach((x) => { try { this.chart.removeSeries(x); } catch { /* gone */ } }); }
+      this.ind = []; if (this.mk) this.mk.setMarkers([]);
+    }
+    scheduleInd(newBar) {
+      if (!this.cfg.indicators.length) return;
+      if (newBar) { clearTimeout(this.indT); this.indT = null; this.refreshIndicators(false); return; }
+      if (this.indT) return;
+      this.indT = setTimeout(() => { this.indT = null; this.refreshIndicators(false); }, 1000); // throttled recompute
+    }
+    refreshIndicators(full) {
+      if (!this.main || !window.PMTInd) return;
+      if (full) this.clearIndicators();
+      const n = this.candles.length; if (!n) return;
+      const step = n > 1 ? this.candles[n - 1].time - this.candles[n - 2].time : 3600;
+      const tm = (i) => (i < n ? this.candles[i].time : this.candles[n - 1].time + (i - n + 1) * step);
+      let paneIdx = 0; const markers = [];
+      for (const inst of this.cfg.indicators) {
+        if (inst.visible === false) continue;
+        const def = PMTInd.REG[inst.type]; if (!def) continue;
+        let it = this.ind.find((x) => x.inst === inst);
+        if (!it) { if (!def.overlay) paneIdx++; it = { inst, pane: def.overlay ? 0 : paneIdx, series: {}, lv: [], out: null }; this.ind.push(it); this.buildItem(it, def); } else if (!def.overlay) paneIdx = Math.max(paneIdx, it.pane);
+        const out = it.out = def.calc(this.candles, inst.params);
+        for (const o of def.outputs) {
+          const arr = out[o.k];
+          if (o.type === 'levels') {
+            it.lv.forEach((x) => { try { this.chart.removeSeries(x); } catch { /* gone */ } }); it.lv = [];
+            for (const lv of arr) {
+              const ls = this.chart.addSeries(LightweightCharts.LineSeries, { color: lv.color || this.col(inst, o), lineWidth: inst.style?.width || 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false, title: lv.label, crosshairMarkerVisible: false }, it.pane);
+              ls.setData([{ time: tm(lv.from), value: lv.value }, { time: tm(n - 1), value: lv.value }]); it.lv.push(ls);
+            }
+          } else if (o.type === 'markers') {
+            for (const m of arr) markers.push({ time: this.candles[m.i].time, position: m.pos === 'above' ? 'aboveBar' : 'belowBar', shape: m.pos === 'above' ? 'arrowDown' : 'arrowUp', color: m.color, text: m.text });
+          } else {
+            const sh = o.shift ? (o.shift[0] === '-' ? -inst.params[o.shift.slice(1)] : inst.params[o.shift]) : 0, cl = out.colors && out.colors[o.k];
+            const data = [];
+            for (let i = 0; i < arr.length; i++) {
+              const j = i + sh; if (j < 0) continue;
+              const v = arr[i]; const pt = { time: tm(j) };
+              if (v !== null) { pt.value = v; if (cl && cl[i]) pt.color = cl[i]; }
+              data.push(pt);
+            }
+            it.series[o.k].setData(data);
+          }
+        }
+      }
+      markers.sort((a, b) => a.time - b.time);
+      if (markers.length || this.mk) { if (!this.mk) this.mk = LightweightCharts.createSeriesMarkers(this.main, []); this.mk.setMarkers(markers); }
+      if (full && paneIdx > 0) { try { this.chart.panes()[0].setStretchFactor(3); } catch { /* old api */ } }
+    }
+    col(inst, o) { return (inst.style && inst.style.colors && inst.style.colors[o.k]) || o.color; }
+    buildItem(it, def) {
+      const LC = LightweightCharts, inst = it.inst; let firstS = null;
+      for (const o of def.outputs) {
+        if (o.type === 'levels' || o.type === 'markers') continue;
+        const base = { color: this.col(inst, o), lineWidth: inst.style?.width || 1, priceLineVisible: false, lastValueVisible: !def.overlay, title: '' };
+        let s;
+        if (o.type === 'hist') s = this.chart.addSeries(LC.HistogramSeries, { color: this.col(inst, o), priceLineVisible: false, lastValueVisible: false }, it.pane);
+        else if (o.type === 'dots') s = this.chart.addSeries(LC.LineSeries, { ...base, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2 }, it.pane);
+        else s = this.chart.addSeries(LC.LineSeries, base, it.pane);
+        it.series[o.k] = s; firstS = firstS || s;
+      }
+      if (firstS && def.hlines) def.hlines.forEach((p) => firstS.createPriceLine({ price: p, color: '#7d8590', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: '' }));
+    }
+    indLegend(time) {
+      let html = '';
+      for (const it of this.ind) {
+        const def = PMTInd.REG[it.inst.type]; if (!it.out) continue;
+        const idx = this.candles.findIndex((x) => x.time === time);
+        const vals = def.outputs.filter((o) => o.type !== 'levels' && o.type !== 'markers' && !o.shift).map((o) => {
+          const v = it.out[o.k][idx >= 0 ? idx : this.candles.length - 1];
+          return v === null || v === undefined ? '' : `<span style="color:${this.col(it.inst, o)}">${Math.abs(v) >= 100 ? v.toFixed(2) : v.toPrecision(5)}</span>`;
+        }).join(' ');
+        html += `<br><span style="color:var(--mut)">${def.name}(${Object.values(it.inst.params).join(',')})</span> ${vals}`;
+      }
+      return html;
+    }
+    addInd(type) {
+      const def = PMTInd.REG[type]; this.cfg.indicators.push({ uid: Date.now() + '' + Math.floor(Math.random() * 1000), type, params: PMTInd.defaults(type), style: { colors: {}, width: 1 }, visible: true });
+      this.refreshIndicators(true); this.cross(null);
+    }
+    changeInd() { this.refreshIndicators(true); this.cross(null); }
     set(patch) { Object.assign(this.cfg, patch); }
     destroy() { this.unsubscribe(); this.chart.remove(); this.el.remove(); }
   }
@@ -272,7 +359,62 @@
       row('Funding', fr) + row('След. funding', t.nextFunding ? fmtTime(t.nextFunding / 1000, { hour: '2-digit', minute: '2-digit' }) : '') + row('Open Interest', t.oi);
   }
 
+
+  // ---------- indicators dialog & templates ----------
+  const tplAll = () => store.get('tpl', {});
+  function renderInd() {
+    const p = panes[active];
+    $('#indFor').textContent = `— окно ${active + 1}: ${p.cfg.symbol}`;
+    const cats = {};
+    Object.values(PMTInd.REG).forEach((d) => (cats[d.cat] = cats[d.cat] || []).push(d));
+    $('#indAdd').innerHTML = Object.entries(cats).map(([c, l]) => `<optgroup label="${c}">${l.map((d) => `<option value="${d.id}">${d.name}</option>`).join('')}</optgroup>`).join('');
+    const t = tplAll(); $('#tplSel').innerHTML = '<option value="">— шаблон —</option>' + Object.keys(t).map((k) => `<option>${k.replace(/</g, '&lt;')}</option>`).join('');
+    $('#indList').innerHTML = p.cfg.indicators.map((inst) => {
+      const d = PMTInd.REG[inst.type];
+      const ps = d.params.map((q) => q.type === 'select'
+        ? `<label>${q.label} <select data-u="${inst.uid}" data-p="${q.k}">${q.options.map((o) => `<option${o === inst.params[q.k] ? ' selected' : ''}>${o}</option>`).join('')}</select></label>`
+        : `<label>${q.label} <input type="number" step="${q.step || 1}" value="${inst.params[q.k]}" data-u="${inst.uid}" data-p="${q.k}"></label>`).join('');
+      const cs = d.outputs.map((o) => `<label>${o.label} <input type="color" value="${(inst.style.colors && inst.style.colors[o.k]) || o.color}" data-u="${inst.uid}" data-c="${o.k}"></label>`).join('');
+      return `<div class="card"><div class="h"><input type="checkbox" data-u="${inst.uid}" data-vis ${inst.visible !== false ? 'checked' : ''} title="Показать/скрыть"><span>${d.name}</span><span class="grow"></span><button data-u="${inst.uid}" data-del>Удалить</button></div>
+        <div>${ps}</div><div>${cs}<label>Толщина <input type="number" min="1" max="5" value="${inst.style.width || 1}" data-u="${inst.uid}" data-w></label></div></div>`;
+    }).join('') || '<div style="color:var(--mut)">Нет индикаторов. Выберите из списка и нажмите «Добавить».</div>';
+  }
+  function indEvent(e) {
+    const el = e.target, u = el.dataset && el.dataset.u; if (!u) return;
+    const p = panes[active], inst = p.cfg.indicators.find((x) => x.uid === u); if (!inst) return;
+    if (el.dataset.p) { const q = PMTInd.REG[inst.type].params.find((x) => x.k === el.dataset.p); inst.params[q.k] = q.type === 'select' ? el.value : Math.max(q.min || 0, parseFloat(el.value) || q.def); }
+    else if (el.dataset.c !== undefined && el.dataset.c !== '') { (inst.style.colors = inst.style.colors || {})[el.dataset.c] = el.value; }
+    else if ('w' in el.dataset) inst.style.width = Math.min(5, Math.max(1, parseInt(el.value, 10) || 1));
+    else if ('vis' in el.dataset) inst.visible = el.checked;
+    p.changeInd(); save();
+  }
+  function wireIndicators() {
+    $('#btnInd').onclick = () => { $('#indDlg').classList.remove('hidden'); renderInd(); };
+    $('#indClose').onclick = () => $('#indDlg').classList.add('hidden');
+    $('#indDlg').onmousedown = (e) => { if (e.target.id === 'indDlg') $('#indDlg').classList.add('hidden'); };
+    $('#indAddBtn').onclick = () => { panes[active].addInd($('#indAdd').value); save(); renderInd(); };
+    $('#indList').onchange = indEvent;
+    $('#indList').onclick = (e) => {
+      if (!('del' in (e.target.dataset || {}))) return;
+      const p = panes[active]; p.cfg.indicators = p.cfg.indicators.filter((x) => x.uid !== e.target.dataset.u); p.changeInd(); save(); renderInd();
+    };
+    $('#tplSave').onclick = () => {
+      const name = (prompt('Имя шаблона') || '').trim(); if (!name) return;
+      const c = panes[active].cfg, t = tplAll(); t[name] = { type: c.type, indicators: JSON.parse(JSON.stringify(c.indicators)) }; store.set('tpl', t); renderInd(); $('#tplSel').value = name;
+    };
+    $('#tplDel').onclick = () => { const t = tplAll(), k = $('#tplSel').value; if (k) { delete t[k]; store.set('tpl', t); renderInd(); } };
+    $('#tplApply').onclick = () => {
+      const tpl = tplAll()[$('#tplSel').value]; if (!tpl) return;
+      for (const p of (state.sync ? panes : [panes[active]])) {
+        p.cfg.type = tpl.type; p.cfg.indicators = JSON.parse(JSON.stringify(tpl.indicators)).map((x, i) => ({ ...x, uid: Date.now() + '' + i }));
+        p.buildSeries();
+      }
+      save(); setActive(active); renderInd();
+    };
+  }
+
   function init() {
+    wireIndicators();
     $('#tfButtons').innerHTML = TFS.map(([v, l]) => `<button data-tf="${v}">${l}</button>`).join('');
     $('#tfButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ tf: b.dataset.tf }); };
     $('#typeButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ type: b.dataset.type }); };

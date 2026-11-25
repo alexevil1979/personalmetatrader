@@ -36,6 +36,7 @@
   <select id="tz" title="Часовой пояс"><option value="UTC">UTC</option><option value="local">Локальное</option></select>
   <select id="theme" title="Тема"><option value="dark">Тёмная</option><option value="light">Светлая</option></select>
   <span class="grow"></span>
+  <button id="btnInd" title="Индикаторы">ƒ Индикаторы</button>
   <button id="togWatch" class="on" title="Обзор рынка">Обзор</button>
   <button id="togInfo" class="on" title="Нижняя панель">Инфо</button>
   <span id="conn" class="dot off" title="WebSocket"></span>
@@ -54,7 +55,15 @@
   <div id="infoGrid"></div>
 </footer>
 
+<div id="indDlg" class="dlg hidden"><div class="dlgbox">
+  <div class="dlghead"><b>Индикаторы</b> <span id="indFor"></span><button id="indClose">✕</button></div>
+  <div class="dlgrow"><select id="indAdd"></select><button id="indAddBtn">Добавить</button>
+    <span class="grow"></span><select id="tplSel"></select><button id="tplApply">Применить</button><button id="tplSave">Сохранить шаблон</button><button id="tplDel">Удалить</button></div>
+  <div id="indList"></div>
+</div></div>
+
 <script src="/assets/vendor/lightweight-charts.js"></script>
+<script src="/assets/indicators.js"></script>
 <script src="/assets/terminal.js"></script>
 </body>
 </html>
