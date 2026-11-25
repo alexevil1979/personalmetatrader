@@ -5,7 +5,7 @@ Stack: PHP 8.3+, MySQL 8, Apache 2.4, Redis, vanilla JS + TradingView Lightweigh
 
 Live: https://pmt.1tlt.ru (also :18088 on the LAN).
 
-Status: **Stages 1-5 + auth/DB + Pine Script done** (infra; terminal UI, Bybit REST + WebSocket, candle cache; 33 indicators; 14 drawing tools). See [docs/AUDIT.md](docs/AUDIT.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Status: **Stages 1-6 + auth/DB + Pine Script done** (infra; terminal UI, Bybit REST + WebSocket, candle cache; 33 indicators; 14 drawing tools). See [docs/AUDIT.md](docs/AUDIT.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Install
 ```bash
@@ -52,3 +52,6 @@ MQL4/MQL5 indicators are executed by an own compiler/runtime in a sandbox (separ
 
 ## Pine Script
 TradingView Pine v5 indicators run in the same sandbox as MQL (upload `.pine` in the MQL dialog). Labels, lines, tables, plots, shapes and background colours are rendered on the chart; `request.security` fetches higher timeframes from Bybit. See [docs/PINE.md](docs/PINE.md) for the supported subset and limits; tests: `node tests/pine.test.js`.
+
+## Strategy Tester (stage 6)
+Pine `strategy()` scripts run through a broker emulator (next-open fills, OHLC-path stops/limits, commission, slippage) with metrics, equity/drawdown chart and stored history. See [docs/STRATEGY_TESTER.md](docs/STRATEGY_TESTER.md); tests: `node tests/pine_strategy.test.js`.
