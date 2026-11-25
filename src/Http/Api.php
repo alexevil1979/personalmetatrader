@@ -9,6 +9,7 @@ use PMT\Core\Auth;
 use PMT\Core\Cache;
 use PMT\Core\Db;
 use PMT\Core\Log;
+use PMT\Mql\Scripts;
 
 final class Api
 {
@@ -142,10 +143,74 @@ final class Api
         self::out(['error' => 'not found'], 404);
     }
 
+    private static function mql(string $path, string $method, int $uid): void
+    {
+        try {
+            if ($path === '/api/mql/scripts' && $method === 'GET') {
+                self::out(['scripts' => Scripts::list($uid)]);
+                return;
+            }
+            if ($path === '/api/mql/scripts' && $method === 'POST') {
+                $b = self::body(3000000);
+                self::out(Scripts::create($uid, (string) ($b['name'] ?? ''), (string) ($b['lang'] ?? ''), $b['source'] ?? null, $b['binary'] ?? null));
+                return;
+            }
+            if (preg_match('#^/api/mql/scripts/(\d+)(/(describe|logs|version))?$#', $path, $m)) {
+                $id = (int) $m[1];
+                $sub = $m[3] ?? '';
+                if ($sub === 'describe' && $method === 'POST') {
+                    self::out(Scripts::describe($uid, $id));
+                } elseif ($sub === 'logs' && $method === 'GET') {
+                    self::out(['logs' => Scripts::logs($uid, $id)]);
+                } elseif ($sub === 'version' && $method === 'GET') {
+                    self::out(Scripts::version($uid, $id, (int) ($_GET['v'] ?? 1)));
+                } elseif ($sub === '' && $method === 'GET') {
+                    self::out(Scripts::get($uid, $id));
+                } elseif ($sub === '' && $method === 'PUT') {
+                    $b = self::body(400000);
+                    self::out(Scripts::update($uid, $id, (string) ($b['source'] ?? ''), $b['name'] ?? null));
+                } elseif ($sub === '' && $method === 'DELETE') {
+                    Scripts::delete($uid, $id);
+                    self::out(['ok' => true]);
+                } else {
+                    self::out(['error' => 'method'], 405);
+                }
+                return;
+            }
+            if ($path === '/api/mql/run' && $method === 'POST') {
+                if (!Cache::rateLimit('mqlrun:' . $uid, 120)) {
+                    self::out(['error' => 'rate limit'], 429);
+                    return;
+                }
+                $b = self::body(20000);
+                $inputs = is_array($b['inputs'] ?? null) ? $b['inputs'] : [];
+                foreach ($inputs as $k => $v) {
+                    if (!is_string($k) || !preg_match('/^\w{1,64}$/', $k) || !(is_scalar($v))) {
+                        throw new InvalidArgumentException('bad inputs');
+                    }
+                }
+                self::out(Scripts::run(
+                    $uid, (int) ($b['id'] ?? 0), Market::checkCategory((string) ($b['category'] ?? 'linear')),
+                    Market::checkSymbol((string) ($b['symbol'] ?? '')), Market::checkTf((string) ($b['tf'] ?? '60')),
+                    $inputs, (int) ($b['limit'] ?? 1500), isset($b['version']) ? (int) $b['version'] : null
+                ));
+                return;
+            }
+        } catch (\RuntimeException $e) {
+            self::out(['error' => $e->getMessage()], 503);
+            return;
+        }
+        self::out(['error' => 'not found'], 404);
+    }
+
     private static function dispatch(string $path, string $method, array $user): void
     {
         $uid = (int) $user['id'];
         $pdo = Db::pdo();
+        if (str_starts_with($path, '/api/mql/')) {
+            self::mql($path, $method, $uid);
+            return;
+        }
         switch ($path) {
             case '/api/symbols':
                 self::out(Market::symbols(Market::checkCategory($_GET['category'] ?? 'linear')));
