@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PersonalMetaTrader</title>
+<link rel="stylesheet" href="/assets/terminal.css">
+</head>
+<body>
+<header id="toolbar">
+  <span class="brand">PMT</span>
+  <select id="category" title="Рынок">
+    <option value="linear">USDT/USDC Perp</option>
+    <option value="spot">Spot</option>
+    <option value="inverse">Inverse</option>
+  </select>
+  <input id="symbolInput" list="symbolList" placeholder="Символ" autocomplete="off" spellcheck="false">
+  <datalist id="symbolList"></datalist>
+  <div class="sep"></div>
+  <div id="tfButtons" class="btngroup"></div>
+  <div class="sep"></div>
+  <div id="typeButtons" class="btngroup">
+    <button data-type="candles" class="on" title="Японские свечи">Свечи</button>
+    <button data-type="bars" title="Бары OHLC">Бары</button>
+    <button data-type="line" title="Линия">Линия</button>
+    <button data-type="ha" title="Heikin Ashi">HA</button>
+  </div>
+  <div class="sep"></div>
+  <div id="layoutButtons" class="btngroup">
+    <button data-layout="1" class="on" title="1 график">▢</button>
+    <button data-layout="2" title="2 графика">◫</button>
+    <button data-layout="4" title="4 графика">⊞</button>
+  </div>
+  <label class="chk" title="Синхронизировать символ и ТФ между графиками"><input type="checkbox" id="syncAll"> синхр.</label>
+  <div class="sep"></div>
+  <select id="tz" title="Часовой пояс"><option value="UTC">UTC</option><option value="local">Локальное</option></select>
+  <select id="theme" title="Тема"><option value="dark">Тёмная</option><option value="light">Светлая</option></select>
+  <span class="grow"></span>
+  <button id="togWatch" class="on" title="Обзор рынка">Обзор</button>
+  <button id="togInfo" class="on" title="Нижняя панель">Инфо</button>
+  <span id="conn" class="dot off" title="WebSocket"></span>
+</header>
+
+<main>
+  <aside id="watch">
+    <div class="panel-title">Обзор рынка</div>
+    <input id="watchFilter" placeholder="Фильтр">
+    <div id="watchList"></div>
+  </aside>
+  <section id="charts"></section>
+</main>
+
+<footer id="info">
+  <div id="infoGrid"></div>
+</footer>
+
+<script src="/assets/vendor/lightweight-charts.js"></script>
+<script src="/assets/terminal.js"></script>
+</body>
+</html>
