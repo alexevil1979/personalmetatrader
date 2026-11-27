@@ -9,6 +9,8 @@
   const NAMES = { hline: 'Горизонтальная линия', vline: 'Вертикальная линия', trend: 'Трендовая линия', ray: 'Луч', channel: 'Канал', rect: 'Прямоугольник', fibret: 'Fibonacci Retracement', fibext: 'Fibonacci Extension', fibfan: 'Fibonacci Fan', fibtime: 'Fibonacci Time Zones', pitchfork: 'Вилы Эндрюса', text: 'Текст', arrow: 'Стрелка', pricelabel: 'Ценовая метка', pencil: 'Карандаш — свободная линия', levelup: 'Верхний уровень (уведомление)', leveldn: 'Нижний уровень (уведомление)' };
   const DEF_COLOR = { fibret: '#ff9800', fibext: '#ff9800', fibfan: '#ff9800', fibtime: '#ff9800', pitchfork: '#e91e63', channel: '#2962ff', rect: '#2962ff', arrow: '#ffeb3b', text: '#d1d4dc', pricelabel: '#26a69a', pencil: '#26a69a', levelup: '#ef5350', leveldn: '#26a69a' };
   const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+  // service objects render on the chart but are not user-facing drawing tools (no toolbar button)
+  const SERVICE = ['levelup', 'leveldn'];
   const colorOf = (o) => o.style.color || DEF_COLOR[o.type] || '#2962ff';
 
   const far = (a, b, W, H) => { const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, k = (W + H) * 3 / len; return { x: a.x + dx * k, y: a.y + dy * k }; };
@@ -260,5 +262,5 @@
     save() { persist(this.key); }
   }
 
-  window.PMTDraw = { Drawings, NEED, NAMES, DEF_COLOR, colorOf, geom };
+  window.PMTDraw = { Drawings, NEED, NAMES, DEF_COLOR, colorOf, geom, SERVICE };
 })();
