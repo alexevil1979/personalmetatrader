@@ -126,6 +126,32 @@
   }
   const symInfo = (cat, sym) => (symbolsByCat[cat] || []).find((s) => s.symbol === sym);
 
+  // ---------- settings dialog (profile + notifications) ----------
+  function wireSettings() {
+    const dlg = $('#setDlg'), msg = $('#setMsg');
+    const say = (s) => (msg.textContent = s);
+    $('#btnSettings').onclick = async () => {
+      dlg.classList.remove('hidden'); say('');
+      $('#setEmail').textContent = $('#userEmail').textContent;
+      try { const j = await call('GET', 'notify'); $('#setTgToken').value = j.telegram_token || ''; $('#setTgChat').value = j.telegram_chat || ''; } catch { /* leave empty */ }
+    };
+    $('#setClose').onclick = () => dlg.classList.add('hidden');
+    dlg.onmousedown = (e) => { if (e.target === dlg) dlg.classList.add('hidden'); };
+    $('#setPassGo').onclick = async () => {
+      const p1 = $('#setPass1').value, p2 = $('#setPass2').value;
+      if (p1 !== p2) { say('Пароли не совпадают'); return; }
+      if (p1.length < 10) { say('Пароль: от 10 символов'); return; }
+      try { await call('POST', 'auth/password', null, { password: p1 }); $('#setPass1').value = $('#setPass2').value = ''; say('Пароль изменён'); } catch (e) { say(e.message); }
+    };
+    $('#setTgGo').onclick = async () => {
+      try { await call('PUT', 'notify', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim() }); say('Сохранено'); } catch (e) { say(e.message); }
+    };
+    $('#setTgTest').onclick = async () => {
+      say('Отправляю…');
+      try { await call('POST', 'notify/test', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim() }); say('Отправлено — проверьте Telegram'); } catch (e) { say(e.message); }
+    };
+  }
+
   // ---------- alert levels (server-monitored, Telegram notify on breakout) ----------
   const LVL_UP = -101, LVL_DN = -102;
   async function loadLevels(p) {
@@ -133,7 +159,7 @@
     try {
       const j = await call('GET', 'levels', { category: cat, symbol: sym });
       if (!panes.includes(p) || p.cfg.category !== cat || p.cfg.symbol !== sym) return;
-      applyLevels(p, j.levels);
+      if (j && j.levels !== undefined) applyLevels(p, j.levels); // garbage/failed response: keep current lines
     } catch { /* offline */ }
   }
   function applyLevels(p, lv) {
@@ -848,6 +874,7 @@ if showLabels and ta.crossunder(close, ma)
       await saveLevels({ cfg: c, dw: { service: [{ id: LVL_UP, pts: [{ p: up }] }, { id: LVL_DN, pts: [{ p: lo }] }] } }).catch(() => {});
       applyLevels(p, { upper: up, lower: lo });
     };
+    wireSettings();
     $('#tz').value = state.tz; $('#tz').onchange = (e) => { state.tz = e.target.value; panes.forEach((p) => p.applyTheme()); save(); };
     $('#theme').value = state.theme; $('#theme').onchange = (e) => { state.theme = e.target.value; document.body.classList.toggle('light', state.theme === 'light'); panes.forEach((p) => p.applyTheme()); save(); };
     document.body.classList.toggle('light', state.theme === 'light');

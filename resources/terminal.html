@@ -40,6 +40,7 @@
   <button id="btnMql" title="Скрипты и индикаторы MQL4/MQL5">MQL</button>
   <button id="btnInd" title="Индикаторы">ƒ Индикаторы</button>
   <button id="btnLevels" title="Поставить два уровня уведомлений: выше и ниже текущей цены (±1%)">⇕ Уровни</button>
+  <button id="btnSettings" title="Настройки: профиль и уведомления">⚙ Настройки</button>
   <button id="togWatch" class="on" title="Обзор рынка">Обзор</button>
   <button id="togInfo" class="on" title="Нижняя панель">Инфо</button>
   <span id="userBox" class="hidden"><span id="userEmail"></span> <button id="btnLogout" title="Выйти">Выйти</button></span>
@@ -107,6 +108,24 @@
   <input id="authPass" type="password" placeholder="Пароль" autocomplete="current-password">
   <button id="authGo" class="on">Войти</button>
   <div id="authLinks"></div><div id="authMsg"></div>
+</div></div>
+
+<div id="setDlg" class="dlg hidden"><div class="dlgbox authbox" style="width:420px">
+  <div class="dlghead"><b>Настройки</b><button id="setClose">✕</button></div>
+  <details open><summary>Профиль</summary>
+    <div style="color:var(--mut);margin:6px 0">Аккаунт: <b id="setEmail"></b></div>
+    <input id="setPass1" type="password" placeholder="Новый пароль (от 10 символов)" autocomplete="new-password">
+    <input id="setPass2" type="password" placeholder="Повторите пароль" autocomplete="new-password">
+    <button id="setPassGo" class="on">Сменить пароль</button>
+  </details>
+  <details open><summary>Уведомления — Telegram</summary>
+    <div style="color:var(--mut);margin:6px 0">Токен бота от @BotFather и ID чата (узнать: напишите боту любое сообщение, затем «Проверить»).</div>
+    <input id="setTgToken" placeholder="Токен бота (123456:ABC-DEF...)">
+    <input id="setTgChat" placeholder="ID чата (например 123456789)">
+    <button id="setTgGo" class="on">Сохранить</button>
+    <button id="setTgTest" title="Отправить тестовое сообщение">Проверить</button>
+  </details>
+  <div id="setMsg"></div>
 </div></div>
 
 <script src="/assets/vendor/lightweight-charts.js"></script>

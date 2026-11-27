@@ -17,9 +17,13 @@ use PMT\Core\Log;
 
 const POLL_SEC = 10;
 
-function tgSend(string $chat, string $text): bool
+function tgSend(int $uid, string $text): bool
 {
-    $token = \PMT\Core\Env::get('TELEGRAM_BOT_TOKEN', '');
+    $st = Db::pdo()->prepare('SELECT telegram_token, telegram_chat FROM user_notify WHERE user_id=?');
+    $st->execute([$uid]);
+    $s = $st->fetch() ?: [];
+    $token = !empty($s['telegram_token']) ? $s['telegram_token'] : \PMT\Core\Env::get('TELEGRAM_BOT_TOKEN', '');
+    $chat = !empty($s['telegram_chat']) ? $s['telegram_chat'] : \PMT\Core\Env::get('TELEGRAM_CHAT_ID', '');
     if ($token === '' || $chat === '') {
         return false;
     }
@@ -32,18 +36,6 @@ function tgSend(string $chat, string $text): bool
     $ok = curl_exec($ch) !== false && (int) curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200;
     curl_close($ch);
     return $ok;
-}
-
-function chatFor(int $uid): string
-{
-    static $chats = null;
-    if ($chats === null) {
-        $chats = [];
-        foreach (Db::pdo()->query('SELECT user_id, telegram_chat FROM user_notify WHERE telegram_chat IS NOT NULL AND telegram_chat <> ""') as $r) {
-            $chats[(int) $r['user_id']] = (string) $r['telegram_chat'];
-        }
-    }
-    return $chats[$uid] ?? \PMT\Core\Env::get('TELEGRAM_CHAT_ID', '');
 }
 
 function fmt(float|string|null $v): string
@@ -93,8 +85,7 @@ while (true) {
                     ? "вышел ВЫШЕ верхнего уровня {$up} (last " . fmt($last) . ')'
                     : "ушел НИЖЕ нижнего уровня {$lo} (last " . fmt($last) . ')';
                 $msg = "🚨 {$r['symbol']}: цена " . fmt($last) . ($zone === 'above' ? ' выше' : ' ниже') . ' уровня ' . fmt($zone === 'above' ? $up : $lo);
-                $chat = chatFor((int) $r['user_id']);
-                if (tgSend($chat, $msg)) {
+                if (tgSend((int) $r['user_id'], $msg)) {
                     Log::write('notify', "level breakout sent: {$r['symbol']} $dir", (int) $r['user_id']);
                 } else {
                     Log::write('notify', "level breakout NOT sent (no token/chat): {$r['symbol']} $dir", (int) $r['user_id'], [], 'warn');

@@ -278,3 +278,6 @@ CREATE TABLE IF NOT EXISTS price_levels (
   UNIQUE KEY uq_levels (user_id, category, symbol),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+-- migration: Telegram bot settings moved to user settings UI
+ALTER TABLE user_notify ADD COLUMN telegram_token VARCHAR(128) NULL;

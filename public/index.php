@@ -17,6 +17,7 @@ if (str_starts_with($path, '/api/')) {
 }
 
 header('Content-Type: text/html; charset=utf-8');
+header('Cache-Control: no-store'); // the page embeds asset versions; a stale cached page breaks the app
 header("Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://stream.bybit.com; img-src 'self' data:");
 $html = (string) file_get_contents(dirname(__DIR__) . '/resources/terminal.html');
 // cache-busting by file mtime

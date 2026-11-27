@@ -8,6 +8,7 @@ use PMT\Bybit\Market;
 use PMT\Core\Auth;
 use PMT\Core\Cache;
 use PMT\Core\Db;
+use PMT\Core\Env;
 use PMT\Core\Log;
 use PMT\Mql\Scripts;
 use PMT\Mql\Tester;
@@ -128,6 +129,19 @@ final class Api
                 Log::write('auth', 'login', $u['id'], ['ip' => $ip]);
                 self::out(['user' => $u, 'csrf' => Auth::csrf()]);
                 return;
+            case '/api/auth/password': {
+                $u = Auth::user();
+                if (!$u) {
+                    self::out(['error' => 'unauthorized'], 401);
+                    return;
+                }
+                $pw = (string) ($b['password'] ?? '');
+                Auth::checkPassword($pw);
+                $pdo->prepare('UPDATE users SET password_hash=? WHERE id=?')->execute([password_hash($pw, defined('PASSWORD_ARGON2ID') ? PASSWORD_ARGON2ID : PASSWORD_DEFAULT), $u['id']]);
+                Log::write('auth', 'password changed', (int) $u['id']);
+                self::out(['ok' => true]);
+                return;
+            }
             case '/api/auth/reset-request':
                 // No MTA on the VPS: the link is issued by an admin via `php bin/user.php reset-link EMAIL`.
                 Auth::createResetToken((string) ($b['email'] ?? ''));
@@ -240,6 +254,52 @@ final class Api
             return;
         }
         switch ($path) {
+            case '/api/notify/test': {
+                $st = $pdo->prepare('SELECT telegram_token, telegram_chat FROM user_notify WHERE user_id=?');
+                $st->execute([$uid]);
+                $s = $st->fetch() ?: [];
+                $tok = trim((string) ($b['telegram_token'] ?? '')) ?: (string) ($s['telegram_token'] ?? '') ?: (string) Env::get('TELEGRAM_BOT_TOKEN', '');
+                $chat = trim((string) ($b['telegram_chat'] ?? '')) ?: (string) ($s['telegram_chat'] ?? '') ?: (string) Env::get('TELEGRAM_CHAT_ID', '');
+                if ($tok === '' || $chat === '') {
+                    self::out(['error' => 'Укажите токен бота и ID чата'], 400);
+                    return;
+                }
+                $ch = curl_init("https://api.telegram.org/bot" . rawurlencode($tok) . "/sendMessage");
+                curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_POSTFIELDS => json_encode(['chat_id' => $chat, 'text' => 'PMT: тестовое сообщение — уведомления по уровням настроены'])]);
+                $r = curl_exec($ch);
+                $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if ($code !== 200 || !is_string($r)) {
+                    self::out(['error' => 'Telegram не принял запрос (проверьте токен/чат)'], 502);
+                    return;
+                }
+                $j = json_decode($r, true);
+                if (empty($j['ok'])) {
+                    self::out(['error' => 'Telegram: ' . ($j['description'] ?? 'ошибка') . ' — проверьте чат (напишите боту /start)'], 400);
+                    return;
+                }
+                self::out(['ok' => true]);
+                return;
+            }
+            case '/api/notify': {
+                if ($method === 'PUT') {
+                    $b = self::body(2000);
+                    $tok = isset($b['telegram_token']) ? trim((string) $b['telegram_token']) : '';
+                    $chat = isset($b['telegram_chat']) ? trim((string) $b['telegram_chat']) : '';
+                    if (mb_strlen($tok) > 128 || mb_strlen($chat) > 64) {
+                        self::out(['error' => 'too long'], 400);
+                        return;
+                    }
+                    $pdo->prepare('INSERT INTO user_notify (user_id, telegram_token, telegram_chat) VALUES (?,?,?) ON DUPLICATE KEY UPDATE telegram_token=VALUES(telegram_token), telegram_chat=VALUES(telegram_chat)')->execute([$uid, $tok !== '' ? $tok : null, $chat !== '' ? $chat : null]);
+                    self::out(['ok' => true]);
+                    return;
+                }
+                $st = $pdo->prepare('SELECT telegram_token, telegram_chat FROM user_notify WHERE user_id=?');
+                $st->execute([$uid]);
+                $r = $st->fetch() ?: ['telegram_token' => null, 'telegram_chat' => null];
+                self::out(['telegram_token' => $r['telegram_token'], 'telegram_chat' => $r['telegram_chat']]);
+                return;
+            }
             case '/api/levels': {
                 $cat = Market::checkCategory($_GET['category'] ?? 'linear');
                 $sym = Market::checkSymbol($_GET['symbol'] ?? '');
