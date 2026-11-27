@@ -386,6 +386,9 @@ final class Api
                     $pdo->prepare('DELETE FROM chart_objects WHERE user_id=? AND symbol_id=?')->execute([$uid, $sid]);
                     $ins = $pdo->prepare('INSERT INTO chart_objects (user_id, symbol_id, type, points, style) VALUES (?,?,?,?,?)');
                     foreach (array_slice($b['objects'] ?? [], 0, 500) as $o) {
+                        if (in_array($o['type'] ?? '', ['levelup', 'leveldn'], true)) {
+                            continue; // service types live in price_levels, never in chart_objects
+                        }
                         $style = $o['style'] ?? [];
                         $style['cid'] = $o['id'] ?? null;
                         $ins->execute([$uid, $sid, mb_substr((string) ($o['type'] ?? ''), 0, 32), json_encode($o['pts'] ?? []), json_encode($style)]);

@@ -86,7 +86,7 @@
   }
 
   const shared = {}; // key -> objects array shared by every pane showing that symbol
-  const loadKey = (key) => shared[key] || (shared[key] = (() => { try { return JSON.parse(localStorage.getItem('pmt.obj.' + key)) || []; } catch { return []; } })());
+  const loadKey = (key) => shared[key] || (shared[key] = (() => { try { return (JSON.parse(localStorage.getItem('pmt.obj.' + key)) || []).filter((o) => !SERVICE.includes(o.type)); } catch { return []; } })());
   const cache = (key) => { try { localStorage.setItem('pmt.obj.' + key, JSON.stringify(shared[key])); } catch { /* quota */ } };
   const persist = (key) => { cache(key); if (window.PMTSync) PMTSync.obj(key, shared[key]); };
 
@@ -111,7 +111,7 @@
     all() { return this.key ? loadKey(this.key).concat(this.service) : this.service.slice(); }
     setKey(key) {
       this.key = key; this.sel = null; this.creating = null; this.hooks.onSel(this); this.request();
-      if (window.PMTSync) PMTSync.fetchObj(key, (list) => { const a = loadKey(key); a.length = 0; list.forEach((o) => a.push(o)); cache(key); this.request(); }, loadKey(key).slice());
+      if (window.PMTSync) PMTSync.fetchObj(key, (list) => { const a = loadKey(key); a.length = 0; list.filter((o) => !SERVICE.includes(o.type)).forEach((o) => a.push(o)); cache(key); this.request(); }, loadKey(key).slice());
     }
     attach() { if (this.series) { try { this.series.detachPrimitive(this.prim); } catch { /* gone */ } } this.series = this.pane.main; this.series.attachPrimitive(this.prim); }
     request() { if (this.reqUpd) this.reqUpd(); }
