@@ -258,6 +258,7 @@
       this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div>';
       host.appendChild(this.el);
       this.cv = this.el.querySelector('.cv'); this.legend = this.el.querySelector('.ohlc'); this.loadEl = this.el.querySelector('.load');
+      buildTools(this);
       this.dw = new PMTDraw.Drawings(this, drawHooks); this.pov = new PMTPineView.Overlay(this);
       this.chart = LightweightCharts.createChart(this.cv, { autoSize: true, crosshair: { mode: 0 }, timeScale: { timeVisible: true, rightOffset: 8 } });
       this.onReopen = () => this.refreshLatest();
@@ -501,7 +502,7 @@
     changeInd() { this.refreshIndicators(true); this.cross(null); }
     set(patch) { Object.assign(this.cfg, patch); }
     precision() { const i = symInfo(this.cfg.category, this.cfg.symbol); return i ? +i.scale : 2; }
-    destroy() { this.dw.destroy(); this.unsubscribe(); this.chart.remove(); this.el.remove(); }
+    destroy() { this.dw.destroy(); this.unsubscribe(); this.chart.remove(); const b = this.el.querySelector('#objBar'); if (b) document.body.appendChild(b); this.el.remove(); }
   }
 
   // ---------- UI wiring ----------
@@ -578,6 +579,20 @@
 
   // ---------- drawing tools wiring ----------
   let tool = 'cursor';
+  const TOOL_GLYPHS = { hline: '─', vline: '│', trend: '╱', ray: '↗', channel: '▱', rect: '▭', fibret: 'Fib', fibext: 'FbE', fibfan: 'Fan', fibtime: 'FbT', pitchfork: 'Ψ', text: 'T', arrow: '➚', pricelabel: '$', pencil: '✎' };
+  const TOOL_BUTTONS = [['cursor', '⌖', 'Курсор / выбор'], ...Object.entries(PMTDraw.NAMES).filter(([k]) => !PMTDraw.SERVICE.includes(k)).map(([k, n]) => [k, TOOL_GLYPHS[k], n])]
+    .map(([k, g, n]) => `<button data-tool="${k}" title="${n}"${k === 'cursor' ? ' class="on"' : ''}>${g}</button>`).join('');
+  // per-pane floating tool strip; the strip belongs to its pane, one tool is shared globally
+  function buildTools(p) {
+    const el = document.createElement('div'); el.className = 'pTools';
+    el.innerHTML = TOOL_BUTTONS + '<button class="clr" title="Удалить все объекты на этом символе">⌫</button>';
+    el.onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.classList.contains('clr')) { if (confirm('Удалить все объекты на этом символе?')) p.dw.clearAll(); return; }
+      setTool(b.dataset.tool);
+    };
+    p.el.appendChild(el);
+  }
   const drawHooks = {
     tool: () => tool,
     defColor: () => '#2962ff',
@@ -588,23 +603,20 @@
     onServiceRemove: (dw) => { const p = panes.find((x) => x.dw === dw); if (p) saveLevels(p); },
   };
   function setTool(t) {
-    tool = t; document.querySelectorAll('#tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
+    tool = t; document.querySelectorAll('.pTools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
     panes.forEach((p) => { if (t === 'cursor') p.dw.creating = null; p.cv.style.cursor = t === 'cursor' ? '' : 'crosshair'; p.dw.request(); });
   }
   function updateObjBar() {
     const o = panes[active] && panes[active].dw.selected(), bar = $('#objBar');
     bar.classList.toggle('hidden', !o);
-    if (o) { $('#objName').textContent = PMTDraw.NAMES[o.type]; $('#objColor').value = PMTDraw.colorOf(o); $('#objWidth').value = o.style.width || 1; }
+    if (!o) return;
+    panes[active].el.appendChild(bar); // float the bar over the pane that owns the selection
+    $('#objName').textContent = PMTDraw.NAMES[o.type]; $('#objColor').value = PMTDraw.colorOf(o); $('#objWidth').value = o.style.width || 1;
   }
   function wireTools() {
-    const G = { hline: '─', vline: '│', trend: '╱', ray: '↗', channel: '▱', rect: '▭', fibret: 'Fib', fibext: 'FbE', fibfan: 'Fan', fibtime: 'FbT', pitchfork: 'Ψ', text: 'T', arrow: '➚', pricelabel: '$', pencil: '✎' };
-    $('#tools').innerHTML = [['cursor', '⌖', 'Курсор / выбор'], ...Object.entries(PMTDraw.NAMES).filter(([k]) => !PMTDraw.SERVICE.includes(k)).map(([k, n]) => [k, G[k], n])]
-      .map(([k, g, n]) => `<button data-tool="${k}" title="${n}"${k === 'cursor' ? ' class="on"' : ''}>${g}</button>`).join('');
-    $('#tools').onclick = (e) => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); };
     $('#objColor').oninput = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.color = e.target.value; panes[active].dw.save(); panes[active].dw.request(); } };
     $('#objWidth').onchange = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.width = Math.min(6, Math.max(1, +e.target.value || 1)); panes[active].dw.save(); panes[active].dw.request(); } };
     $('#objDel').onclick = () => { panes[active].dw.remove(); };
-    $('#objClear').onclick = () => { if (confirm('Удалить все объекты на этом символе?')) panes[active].dw.clearAll(); };
     window.addEventListener('keydown', (e) => {
       if (/INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''))) return;
       if (e.key === 'Delete' || e.key === 'Backspace') panes[active].dw.remove();
