@@ -10,6 +10,7 @@ use PMT\Core\Cache;
 use PMT\Core\Db;
 use PMT\Core\Env;
 use PMT\Core\Log;
+use PMT\Core\Tg;
 use PMT\Mql\Scripts;
 use PMT\Mql\Tester;
 
@@ -255,27 +256,26 @@ final class Api
         }
         switch ($path) {
             case '/api/notify/test': {
-                $st = $pdo->prepare('SELECT telegram_token, telegram_chat FROM user_notify WHERE user_id=?');
+                $st = $pdo->prepare('SELECT telegram_token, telegram_chat, tg_proxy FROM user_notify WHERE user_id=?');
                 $st->execute([$uid]);
                 $s = $st->fetch() ?: [];
                 $tok = trim((string) ($b['telegram_token'] ?? '')) ?: (string) ($s['telegram_token'] ?? '') ?: (string) Env::get('TELEGRAM_BOT_TOKEN', '');
                 $chat = trim((string) ($b['telegram_chat'] ?? '')) ?: (string) ($s['telegram_chat'] ?? '') ?: (string) Env::get('TELEGRAM_CHAT_ID', '');
+                $proxy = trim((string) ($b['tg_proxy'] ?? '')) ?: (string) ($s['tg_proxy'] ?? '') ?: (string) Env::get('TELEGRAM_PROXY', '');
                 if ($tok === '' || $chat === '') {
                     self::out(['error' => 'Укажите токен бота и ID чата'], 400);
                     return;
                 }
-                $ch = curl_init("https://api.telegram.org/bot" . rawurlencode($tok) . "/sendMessage");
-                curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_POSTFIELDS => json_encode(['chat_id' => $chat, 'text' => 'PMT: тестовое сообщение — уведомления по уровням настроены'])]);
-                $r = curl_exec($ch);
-                $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                if ($code !== 200 || !is_string($r)) {
-                    self::out(['error' => 'Telegram не принял запрос (проверьте токен/чат)'], 502);
-                    return;
-                }
-                $j = json_decode($r, true);
-                if (empty($j['ok'])) {
-                    self::out(['error' => 'Telegram: ' . ($j['description'] ?? 'ошибка') . ' — проверьте чат (напишите боту /start)'], 400);
+                $r = Tg::call($tok, 'sendMessage', ['chat_id' => $chat, 'text' => 'PMT: тестовое сообщение — уведомления по уровням настроены'], $proxy);
+                if (!$r['ok']) {
+                    $why = $r['desc'] ?? $r['err'] ?? 'ошибка';
+                    $code = $r['err'] !== null ? 502 : 400;
+                    if ($r['err'] !== null) {
+                        $why = 'соединение не прошло' . ($proxy !== '' ? ' через прокси' : '') . ': ' . $why;
+                    } elseif ($proxy !== '') {
+                        $why .= ' (через прокси)';
+                    }
+                    self::out(['error' => 'Telegram: ' . $why], $code);
                     return;
                 }
                 self::out(['ok' => true]);
@@ -286,18 +286,23 @@ final class Api
                     $b = self::body(2000);
                     $tok = isset($b['telegram_token']) ? trim((string) $b['telegram_token']) : '';
                     $chat = isset($b['telegram_chat']) ? trim((string) $b['telegram_chat']) : '';
-                    if (mb_strlen($tok) > 128 || mb_strlen($chat) > 64) {
+                    $proxy = isset($b['tg_proxy']) ? trim((string) $b['tg_proxy']) : '';
+                    if (mb_strlen($tok) > 128 || mb_strlen($chat) > 64 || mb_strlen($proxy) > 255) {
                         self::out(['error' => 'too long'], 400);
                         return;
                     }
-                    $pdo->prepare('INSERT INTO user_notify (user_id, telegram_token, telegram_chat) VALUES (?,?,?) ON DUPLICATE KEY UPDATE telegram_token=VALUES(telegram_token), telegram_chat=VALUES(telegram_chat)')->execute([$uid, $tok !== '' ? $tok : null, $chat !== '' ? $chat : null]);
+                    if ($proxy !== '' && Tg::proxyOpts($proxy) === null) {
+                        self::out(['error' => 'Неверный формат прокси — ожидается scheme://[user:pass@]host:port (http, https, socks4, socks5)'], 400);
+                        return;
+                    }
+                    $pdo->prepare('INSERT INTO user_notify (user_id, telegram_token, telegram_chat, tg_proxy) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE telegram_token=VALUES(telegram_token), telegram_chat=VALUES(telegram_chat), tg_proxy=VALUES(tg_proxy)')->execute([$uid, $tok !== '' ? $tok : null, $chat !== '' ? $chat : null, $proxy !== '' ? $proxy : null]);
                     self::out(['ok' => true]);
                     return;
                 }
-                $st = $pdo->prepare('SELECT telegram_token, telegram_chat FROM user_notify WHERE user_id=?');
+                $st = $pdo->prepare('SELECT telegram_token, telegram_chat, tg_proxy FROM user_notify WHERE user_id=?');
                 $st->execute([$uid]);
-                $r = $st->fetch() ?: ['telegram_token' => null, 'telegram_chat' => null];
-                self::out(['telegram_token' => $r['telegram_token'], 'telegram_chat' => $r['telegram_chat']]);
+                $r = $st->fetch() ?: ['telegram_token' => null, 'telegram_chat' => null, 'tg_proxy' => null];
+                self::out(['telegram_token' => $r['telegram_token'], 'telegram_chat' => $r['telegram_chat'], 'tg_proxy' => $r['tg_proxy']]);
                 return;
             }
             case '/api/levels': {

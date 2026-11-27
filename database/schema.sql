@@ -281,3 +281,6 @@ CREATE TABLE IF NOT EXISTS price_levels (
 
 -- migration: Telegram bot settings moved to user settings UI
 ALTER TABLE user_notify ADD COLUMN telegram_token VARCHAR(128) NULL;
+
+-- migration: optional proxy for Telegram API (scheme://[user:pass@]host:port)
+ALTER TABLE user_notify ADD COLUMN tg_proxy VARCHAR(255) NULL;

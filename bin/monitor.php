@@ -19,7 +19,7 @@ const POLL_SEC = 10;
 
 function tgSend(int $uid, string $text): bool
 {
-    $st = Db::pdo()->prepare('SELECT telegram_token, telegram_chat FROM user_notify WHERE user_id=?');
+    $st = Db::pdo()->prepare('SELECT telegram_token, telegram_chat, tg_proxy FROM user_notify WHERE user_id=?');
     $st->execute([$uid]);
     $s = $st->fetch() ?: [];
     $token = !empty($s['telegram_token']) ? $s['telegram_token'] : \PMT\Core\Env::get('TELEGRAM_BOT_TOKEN', '');
@@ -27,15 +27,12 @@ function tgSend(int $uid, string $text): bool
     if ($token === '' || $chat === '') {
         return false;
     }
-    $ch = curl_init("https://api.telegram.org/bot{$token}/sendMessage");
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_POSTFIELDS => json_encode(['chat_id' => $chat, 'text' => $text]),
-    ]);
-    $ok = curl_exec($ch) !== false && (int) curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200;
-    curl_close($ch);
-    return $ok;
+    $proxy = (string) ($s['tg_proxy'] ?? '') ?: \PMT\Core\Env::get('TELEGRAM_PROXY', '');
+    $r = \PMT\Core\Tg::call($token, 'sendMessage', ['chat_id' => $chat, 'text' => $text], $proxy);
+    if (!$r['ok']) {
+        error_log('[pmt-monitor] tgSend failed: ' . ($r['err'] ?? $r['desc'] ?? 'unknown') . ($proxy !== '' ? ' (proxy in use)' : ''));
+    }
+    return $r['ok'];
 }
 
 function fmt(float|string|null $v): string
@@ -88,7 +85,7 @@ while (true) {
                 if (tgSend((int) $r['user_id'], $msg)) {
                     Log::write('notify', "level breakout sent: {$r['symbol']} $dir", (int) $r['user_id']);
                 } else {
-                    Log::write('notify', "level breakout NOT sent (no token/chat): {$r['symbol']} $dir", (int) $r['user_id'], [], 'warn');
+                    Log::write('notify', "level breakout NOT sent (no token/chat or send error, see php log): {$r['symbol']} $dir", (int) $r['user_id'], [], 'warn');
                 }
             }
         }

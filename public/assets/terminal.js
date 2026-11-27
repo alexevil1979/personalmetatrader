@@ -144,7 +144,7 @@
       const email = $('#userEmail').textContent;
       $('#setEmail').textContent = email;
       $('#setAva').textContent = (email[0] || '?').toUpperCase();
-      try { const j = await call('GET', 'notify'); $('#setTgToken').value = j.telegram_token || ''; $('#setTgChat').value = j.telegram_chat || ''; } catch { /* leave empty */ }
+      try { const j = await call('GET', 'notify'); $('#setTgToken').value = j.telegram_token || ''; $('#setTgChat').value = j.telegram_chat || ''; $('#setTgProxy').value = j.tg_proxy || ''; } catch { /* leave empty */ }
     };
     $('#setClose').onclick = () => dlg.classList.add('hidden');
     dlg.onmousedown = (e) => { if (e.target === dlg) dlg.classList.add('hidden'); };
@@ -159,11 +159,11 @@
       try { await call('POST', 'auth/password', null, { password: p1 }); $('#setPass1').value = $('#setPass2').value = ''; say('Пароль изменён', true); } catch (e) { say(e.message); }
     };
     $('#setTgGo').onclick = async () => {
-      try { await call('PUT', 'notify', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim() }); say('Сохранено', true); } catch (e) { say(e.message); }
+      try { await call('PUT', 'notify', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim(), tg_proxy: $('#setTgProxy').value.trim() }); say('Сохранено', true); } catch (e) { say(e.message); }
     };
     $('#setTgTest').onclick = async () => {
       say('Отправляю…');
-      try { await call('POST', 'notify/test', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim() }); say('Отправлено — проверьте Telegram', true); } catch (e) { say(e.message); }
+      try { await call('POST', 'notify/test', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim(), tg_proxy: $('#setTgProxy').value.trim() }); say('Отправлено — проверьте Telegram', true); } catch (e) { say(e.message); }
     };
   }
 
