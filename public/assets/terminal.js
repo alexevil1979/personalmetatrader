@@ -255,9 +255,17 @@
     constructor(host, cfg) {
       this.cfg = cfg; if (!cfg.indicators) cfg.indicators = []; this.ind = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
       this.el = document.createElement('div'); this.el.className = 'pane';
-      this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div>';
+      this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div><div class="cnt hidden"></div>';
       host.appendChild(this.el);
       this.cv = this.el.querySelector('.cv'); this.legend = this.el.querySelector('.ohlc'); this.loadEl = this.el.querySelector('.load');
+      this.cntEl = this.el.querySelector('.cnt');
+      this.el.addEventListener('contextmenu', (e) => {
+        let w = 0; try { w = this.chart.priceScale('right').width(); } catch { /* not ready */ }
+        const r = this.cv.getBoundingClientRect();
+        if (e.clientX - r.left < r.width - w - 4) return; // right-clicked the chart, not the price scale
+        e.preventDefault();
+        showScaleMenu(this, e.clientX, e.clientY);
+      });
       buildTools(this);
       this.dw = new PMTDraw.Drawings(this, drawHooks); this.pov = new PMTPineView.Overlay(this);
       this.chart = LightweightCharts.createChart(this.cv, { autoSize: true, crosshair: { mode: 0 }, timeScale: { timeVisible: true, rightOffset: 8 } });
@@ -302,6 +310,18 @@
       if (this.cfg.type === 'line') return c.map((k) => ({ time: k.time, value: k.close }));
       if (this.cfg.type === 'ha') return heikin(c);
       return c;
+    }
+    tfSec() { const t = TFS.find((x) => x[0] === this.cfg.tf); return !t ? 60 : t[0] === 'D' ? 86400 : t[0] === 'W' ? 604800 : t[0] === 'M' ? 2592000 : +t[0] * 60; }
+    tickCountdown() { // remaining bar time as a label on the price scale
+      const last = this.candles[this.candles.length - 1];
+      let y = null;
+      if (last && this.main) { try { y = this.main.priceToCoordinate(last.close); } catch { /* not ready */ } }
+      const end = last ? (last.time + this.tfSec()) * 1000 - Date.now() : 0;
+      if (y === null || end <= 0) { this.cntEl.classList.add('hidden'); return; }
+      const s = Math.floor(end / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
+      this.cntEl.textContent = d > 0 ? d + 'д' : h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0') : m + ':' + String(ss).padStart(2, '0');
+      this.cntEl.classList.remove('hidden');
+      this.cntEl.style.top = Math.round(y) + 'px';
     }
     volData(c) { const t = chartTheme(); return c.map((k) => ({ time: k.time, value: k.volume, color: (k.close >= k.open ? t.up : t.dn) + '66' })); }
     render() { this.main.setData(this.series(this.candles)); this.vol.setData(this.volData(this.candles)); this.refreshIndicators(true); }
@@ -576,6 +596,38 @@
   }
 
 
+
+  // ---------- price scale context menu (TradingView-like) ----------
+  let scaleMenu = null;
+  const hideScaleMenu = () => { if (scaleMenu) { scaleMenu.remove(); scaleMenu = null; document.removeEventListener('keydown', scaleMenuEsc); } };
+  const scaleMenuEsc = (e) => { if (e.key === 'Escape') hideScaleMenu(); };
+  function showScaleMenu(p, x, y) {
+    hideScaleMenu();
+    const LC = LightweightCharts, ps = p.chart.priceScale('right'), mode = ps.options().mode;
+    const mi = (a, label, on) => `<div class="mi${on ? ' on' : ''}" data-a="${a}">${label}</div>`;
+    const m = document.createElement('div'); m.className = 'ctxmenu';
+    m.innerHTML = mi('reset', 'Сбросить шкалу')
+      + mi('auto', 'Авто (вписать данные)', ps.options().autoScale)
+      + mi('m0', 'Обычная', mode === LC.PriceScaleMode.Normal)
+      + mi('m1', 'Логарифмическая', mode === LC.PriceScaleMode.Logarithmic)
+      + mi('m2', 'Проценты', mode === LC.PriceScaleMode.Percentage)
+      + mi('l', 'Шкала слева', !ps.options().visible)
+      + mi('r', 'Шкала справа', ps.options().visible);
+    m.style.left = Math.min(x, window.innerWidth - 200) + 'px';
+    m.style.top = Math.min(y, window.innerHeight - m.offsetHeight - 10) + 'px';
+    document.body.appendChild(m); scaleMenu = m;
+    m.onclick = (e) => {
+      const b = e.target.closest('.mi'); if (!b) return;
+      const a = b.dataset.a;
+      if (a === 'reset') ps.applyOptions({ autoScale: true, mode: LC.PriceScaleMode.Normal });
+      else if (a === 'auto') ps.applyOptions({ autoScale: true });
+      else if (a === 'm0' || a === 'm1' || a === 'm2') ps.applyOptions({ mode: a === 'm0' ? LC.PriceScaleMode.Normal : a === 'm1' ? LC.PriceScaleMode.Logarithmic : LC.PriceScaleMode.Percentage });
+      else if (a === 'l' || a === 'r') { ps.applyOptions({ visible: a === 'r' }); p.chart.priceScale('left').applyOptions({ visible: a === 'l' }); }
+      hideScaleMenu();
+    };
+    setTimeout(() => document.addEventListener('mousedown', hideScaleMenu, { once: true }), 0);
+    document.addEventListener('keydown', scaleMenuEsc);
+  }
 
   // ---------- drawing tools wiring ----------
   let tool = 'cursor';
@@ -922,6 +974,7 @@ if showLabels and ta.crossunder(close, ma)
     $('#category').value = first.category;
     loadSymbols(first.category).catch(() => {}).finally(() => {
       ensureLayout(); pollTickers(); setInterval(pollTickers, 3000);
+      setInterval(() => panes.forEach((p) => p.tickCountdown()), 1000);
       window.addEventListener('beforeunload', save);
     });
   }
