@@ -42,7 +42,7 @@ reg('strategy.close_all', ['comment', 'alert_message', 'immediately', 'when'], {
 });
 reg('strategy.exit', ['id', 'from_entry', 'qty', 'qty_percent', 'profit', 'limit', 'loss', 'stop', 'trail_price', 'trail_points', 'trail_offset', 'oca_name', 'comment', 'comment_profit', 'comment_loss', 'comment_trailing', 'alert_message', 'when'], {}, (P) => (s, a, n) => {
   const g = (name, i) => (n[name] !== undefined ? n[name] : a[i]); if (g('when', 17) === false) return;
-  need(P, 'strategy.exit').setExit(g('id', 0), { from: g('from_entry', 1), qty: NA(g('qty', 2)), profit: NA(g('profit', 4)), limit: NA(g('limit', 5)), loss: NA(g('loss', 6)), stop: NA(g('stop', 7)), trail_price: NA(g('trail_price', 8)), trail_points: NA(g('trail_points', 9)), trail_offset: NA(g('trail_offset', 10)), comment: g('comment', 12), comment_profit: g('comment_profit', 13), comment_loss: g('comment_loss', 14) });
+  need(P, 'strategy.exit').setExit(g('id', 0), { from: g('from_entry', 1), qty: NA(g('qty', 2)), profit: NA(g('profit', 4)), limit: NA(g('limit', 5)), loss: NA(g('loss', 6)), stop: NA(g('stop', 7)), trail_price: NA(g('trail_price', 8)), trail_points: NA(g('trail_points', 9)), trail_offset: NA(g('trail_offset', 10)), comment: g('comment', 12), comment_profit: g('comment_profit', 13), comment_loss: g('comment_loss', 14), comment_trailing: g('comment_trailing', 15) });
 });
 reg('strategy.cancel', ['id'], {}, (P) => (s, a) => { need(P, 'strategy.cancel').cancel(a[0]); });
 reg('strategy.cancel_all', [], {}, (P) => () => { need(P, 'strategy.cancel_all').cancelAll(); });

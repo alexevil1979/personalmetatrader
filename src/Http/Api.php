@@ -390,6 +390,59 @@ final class Api
                 }
                 self::out($res);
                 return;
+            case '/api/screener': {
+                $cat = Market::checkCategory($_GET['category'] ?? 'linear');
+                $all = Market::tickers($cat);
+                $q = strtoupper(trim((string) ($_GET['q'] ?? '')));
+                $sort = (string) ($_GET['sort'] ?? 'turn24');
+                $dir = strtolower((string) ($_GET['dir'] ?? 'desc')) === 'asc' ? 1 : -1;
+                $minTurn = isset($_GET['minTurn']) && is_numeric($_GET['minTurn']) ? (float) $_GET['minTurn'] : 0.0;
+                $minChg = isset($_GET['minChg']) && $_GET['minChg'] !== '' && is_numeric($_GET['minChg']) ? (float) $_GET['minChg'] : null;
+                $maxChg = isset($_GET['maxChg']) && $_GET['maxChg'] !== '' && is_numeric($_GET['maxChg']) ? (float) $_GET['maxChg'] : null;
+                $limit = max(1, min(300, (int) ($_GET['limit'] ?? 100)));
+                $items = [];
+                foreach ($all as $sym => $t) {
+                    if ($q !== '' && !str_contains($sym, $q)) {
+                        continue;
+                    }
+                    $last = $t['last'] !== null ? (float) $t['last'] : null;
+                    $turn = $t['turn24'] !== null ? (float) $t['turn24'] : 0.0;
+                    $chg = $t['chg24'] !== null ? (float) $t['chg24'] * 100.0 : 0.0;
+                    if ($turn < $minTurn) {
+                        continue;
+                    }
+                    if ($minChg !== null && $chg < $minChg) {
+                        continue;
+                    }
+                    if ($maxChg !== null && $chg > $maxChg) {
+                        continue;
+                    }
+                    $hi = $t['high24'] !== null ? (float) $t['high24'] : null;
+                    $lo = $t['low24'] !== null ? (float) $t['low24'] : null;
+                    $bid = $t['bid'] !== null ? (float) $t['bid'] : null;
+                    $ask = $t['ask'] !== null ? (float) $t['ask'] : null;
+                    $items[] = [
+                        'symbol' => $sym,
+                        'last' => $last,
+                        'chg24' => round($chg, 2),
+                        'vol24' => $t['vol24'] !== null ? (float) $t['vol24'] : 0.0,
+                        'turn24' => $turn,
+                        'funding' => $t['funding'] !== null ? (float) $t['funding'] * 100.0 : null,
+                        'oi' => $t['oi'] !== null ? (float) $t['oi'] : null,
+                        'rangePct' => ($hi !== null && $lo > 0) ? round(($hi - $lo) / $lo * 100.0, 2) : 0.0,
+                        'spreadPct' => ($bid > 0 && $ask > 0) ? round(($ask - $bid) / $ask * 100.0, 4) : 0.0,
+                    ];
+                }
+                $key = in_array($sort, ['turn24', 'chg24', 'vol24', 'funding', 'oi', 'rangePct', 'spreadPct', 'last', 'symbol'], true) ? $sort : 'turn24';
+                usort($items, static function (array $a, array $b) use ($key, $dir): int {
+                    if ($key === 'symbol') {
+                        return $dir * strcmp($a['symbol'], $b['symbol']);
+                    }
+                    return $dir * (($a[$key] ?? -INF) <=> ($b[$key] ?? -INF));
+                });
+                self::out(['items' => array_slice($items, 0, $limit), 'total' => count($items)]);
+                return;
+            }
             case '/api/candles':
                 self::out(Market::candles(
                     Market::checkCategory($_GET['category'] ?? 'linear'),

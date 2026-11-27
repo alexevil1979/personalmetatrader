@@ -88,15 +88,15 @@ final class Tester
             Log::write('tester', 'run failed: ' . ($res['error'] ?? '?'), $uid, ['script' => $scriptId], 'warn');
             return ['ok' => false, 'error' => $res['error'] ?? 'run failed', 'line' => $res['line'] ?? null, 'kind' => $res['kind'] ?? 'mql'];
         }
-        $out = self::trim($res, $from);
+        $out = self::trim($res, $from, $candles);
         $out['testId'] = self::store($uid, $scriptId, $row['name'], $cat, $sym, $tf, $from, $to, $inputs, $tester, $out);
         $out['ms'] = $ms;
         $out['bars'] = count($candles);
         return $out;
     }
 
-    /** Keep only the tested period (warm-up bars are dropped) and downsample the equity curve. */
-    private static function trim(array $res, int $from): array
+    /** Keep only the tested period (warm-up bars are dropped) and downsample the equity + buy&hold curve. */
+    private static function trim(array $res, int $from, array $candles): array
     {
         $times = $res['times'];
         $start = 0;
@@ -107,21 +107,26 @@ final class Tester
             }
         }
         $S = $res['strategy'];
+        $cap = (float) ($S['config']['capital'] ?? 10000);
+        $c0 = (float) ($candles[$start]['close'] ?? 1);
         $eq = [];
+        $bh = [];
         $n = count($times);
         $step = max(1, intdiv($n - $start, 1500));
         for ($i = $start; $i < $n; $i += $step) {
             if ($S['equity'][$i] !== null) {
                 $eq[] = [$times[$i], round((float) $S['equity'][$i], 4)];
+                $bh[] = [$times[$i], round($c0 > 0 ? $cap * ((float) $candles[$i]['close'] / $c0) : $cap, 4)];
             }
         }
         $last = $n - 1;
         if ($S['equity'][$last] !== null && (!$eq || $eq[count($eq) - 1][0] !== $times[$last])) {
             $eq[] = [$times[$last], round((float) $S['equity'][$last], 4)];
+            $bh[] = [$times[$last], round($c0 > 0 ? $cap * ((float) $candles[$last]['close'] / $c0) : $cap, 4)];
         }
         $trades = array_values(array_filter($S['trades'], static fn($t) => $t['entryTime'] >= $from));
         $m = $S['metrics'];
-        return ['ok' => true, 'metrics' => $m, 'config' => $S['config'], 'equity' => $eq, 'trades' => array_slice($trades, -2000), 'openTrades' => $S['openTrades'], 'title' => $res['info']['title'] ?? '', 'logs' => $res['logs'] ?? []];
+        return ['ok' => true, 'metrics' => $m, 'config' => $S['config'], 'equity' => $eq, 'buyHold' => $bh, 'trades' => array_slice($trades, -2000), 'openTrades' => $S['openTrades'], 'title' => $res['info']['title'] ?? '', 'logs' => $res['logs'] ?? []];
     }
 
     private static function store(int $uid, int $scriptId, string $name, string $cat, string $sym, string $tf, int $from, int $to, array $inputs, array $tester, array $out): int
@@ -142,7 +147,7 @@ final class Tester
         $tid = (int) $pdo->lastInsertId();
         $pf = $m['profitFactor'];
         $pdo->prepare('INSERT INTO strategy_test_results (test_id, signals, wins, losses, win_rate, profit_factor, max_drawdown_pct, avg_win, avg_loss, risk_reward, equity_curve, trades) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-            ->execute([$tid, $m['trades'], $m['wins'], $m['losses'], round($m['winRate'], 4), $pf === null ? null : round((float) $pf, 4), round($m['maxDrawdownPct'], 4), round($m['avgWin'], 6), round($m['avgLoss'], 6), $m['riskReward'] === null ? null : round((float) $m['riskReward'], 4), json_encode(['points' => $out['equity'], 'metrics' => $m, 'config' => $cfg]), json_encode($out['trades'])]);
+            ->execute([$tid, $m['trades'], $m['wins'], $m['losses'], round($m['winRate'], 4), $pf === null ? null : round((float) $pf, 4), round($m['maxDrawdownPct'], 4), round($m['avgWin'], 6), round($m['avgLoss'], 6), $m['riskReward'] === null ? null : round((float) $m['riskReward'], 4), json_encode(['points' => $out['equity'], 'buyHold' => $out['buyHold'] ?? [], 'metrics' => $m, 'config' => $cfg]), json_encode($out['trades'])]);
         Log::write('tester', "test #$tid $sym $tf " . $m['trades'] . ' trades', $uid, ['script' => $scriptId]);
         return $tid;
     }
@@ -172,7 +177,7 @@ final class Tester
         }
         $eq = json_decode($r['equity_curve'], true);
         return ['ok' => true, 'testId' => (int) $r['id'], 'symbol' => $r['symbol'], 'category' => $r['category'], 'tf' => $r['tf'], 'from' => intdiv((int) $r['from_time'], 1000), 'to' => intdiv((int) $r['to_time'], 1000),
-            'strategy' => $r['strategy'], 'created_at' => $r['created_at'], 'params' => json_decode($r['params'], true), 'metrics' => $eq['metrics'], 'config' => $eq['config'], 'equity' => $eq['points'], 'trades' => json_decode($r['trades'], true)];
+            'strategy' => $r['strategy'], 'created_at' => $r['created_at'], 'params' => json_decode($r['params'], true), 'metrics' => $eq['metrics'], 'config' => $eq['config'], 'equity' => $eq['points'], 'buyHold' => $eq['buyHold'] ?? [], 'trades' => json_decode($r['trades'], true)];
     }
 
     public static function delete(int $uid, int $id): void

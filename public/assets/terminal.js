@@ -19,7 +19,7 @@
     category: 'linear', theme: 'dark', tz: 'UTC', layout: '1',
     syncOpts: { symbol: false, tf: false, crosshair: false, range: false },
     splits: {}, layoutName: '', favInds: [],
-    watch: {}, showWatch: true, showInfo: true, showLegend: true, panes: [],
+    watch: {}, watchFlags: {}, showWatch: true, showInfo: true, showLegend: true, panes: [],
   };
   const normLayout = (v) => (v === 2 || v === '2' ? '2v' : LAYOUT_LABELS[String(v)] ? String(v) : '1');
   function applyStatePatch(src) {
@@ -34,6 +34,7 @@
     if (!state.splits || typeof state.splits !== 'object') state.splits = {};
     if (!Array.isArray(state.favInds)) state.favInds = [];
     if (!state.watch || typeof state.watch !== 'object') state.watch = {};
+    if (!state.watchFlags || typeof state.watchFlags !== 'object') state.watchFlags = {};
     if (!Array.isArray(state.panes)) state.panes = [];
   }
   const save = () => store.set('state', { ...state, panes: panes.map((p) => p.cfg) });
@@ -970,7 +971,8 @@
     $('#typeBtn').textContent = (CHART_TYPES[c.type] || 'Свечи') + ' ▾';
     document.querySelectorAll('#typeMenu .mi').forEach((m) => m.classList.toggle('on', m.dataset.type === c.type));
     loadSymbols(c.category).catch(() => {});
-    renderWatch(); renderObjTree(); updateInfo(); updateObjBar();
+    renderWatch(); syncWatchWs(); renderObjTree(); updateInfo(); updateObjBar();
+    PMTMarket.syncDom(c.category, c.symbol);
   }
 
   function applyToPanes(patch) {
@@ -1137,22 +1139,92 @@
     PMTUx.toast('Загружен макет: ' + l.name, 'ok');
   }
 
-  // ---------- watchlist ----------
+  // ---------- watchlist pro + live WS tickers ----------
   const watchFor = (cat) => state.watch[cat] || (state.watch[cat] = DEFAULT_WATCH.slice());
-  let tickers = {};
+  const FLAG_COLORS = { red: '#ef5350', green: '#26a69a', blue: '#2962ff', orange: '#ff9800', purple: '#ab47bc' };
+  const flagFor = (cat, s) => (state.watchFlags[cat] && state.watchFlags[cat][s]) || '';
+  function setWatchFlag(cat, s, color) {
+    const map = state.watchFlags[cat] || (state.watchFlags[cat] = {});
+    if (color) map[s] = color; else delete map[s];
+    save(); renderWatch();
+  }
+  let tickers = {}, watchSort = { col: null, dir: 1 }, watchFlagFilter = 'all';
+  const watchWsSubs = new Map();
+  let watchMenu = null;
+  const hideWatchMenu = () => { if (watchMenu) { watchMenu.remove(); watchMenu = null; } };
+
+  function onTickerWs(sym, m) {
+    const d = m && m.data; if (!d) return;
+    const t = tickers[sym] || (tickers[sym] = { symbol: sym, last: 0, chg24: 0, vol24: 0, turn24: 0 });
+    const prev = t.last;
+    if (d.lastPrice !== undefined) t.last = parseFloat(d.lastPrice);
+    if (d.price24hPcnt !== undefined) t.chg24 = parseFloat(d.price24hPcnt);
+    if (d.turnover24h !== undefined) t.turn24 = parseFloat(d.turnover24h);
+    if (d.volume24h !== undefined) t.vol24 = parseFloat(d.volume24h);
+    if (d.fundingRate !== undefined) t.funding = parseFloat(d.fundingRate);
+    if (d.openInterest !== undefined) t.oi = parseFloat(d.openInterest);
+    if (d.highPrice24h !== undefined) t.high24 = parseFloat(d.highPrice24h);
+    if (d.lowPrice24h !== undefined) t.low24 = parseFloat(d.lowPrice24h);
+    if (d.bid1Price !== undefined) t.bid = parseFloat(d.bid1Price);
+    if (d.ask1Price !== undefined) t.ask = parseFloat(d.ask1Price);
+    if (d.markPrice !== undefined) t.mark = parseFloat(d.markPrice);
+    if (d.indexPrice !== undefined) t.index = parseFloat(d.indexPrice);
+    const row = document.querySelector(`#watchList .wrow[data-s="${sym}"]`);
+    if (row) {
+      const chg = t.chg24 * 100;
+      const valEl = row.querySelector('.wv');
+      if (valEl) { valEl.className = 'wv ' + (chg >= 0 ? 'up' : 'dn'); valEl.textContent = `${t.last} ${(chg >= 0 ? '+' : '') + chg.toFixed(2)}%`; }
+      if (d.lastPrice !== undefined && prev && t.last !== prev) {
+        row.classList.remove('tick-up', 'tick-dn');
+        void row.offsetWidth;
+        row.classList.add(t.last > prev ? 'tick-up' : 'tick-dn');
+      }
+    }
+    if (panes[active] && panes[active].cfg.symbol === sym) updateInfo();
+  }
+  function syncWatchWs() {
+    if (!panes[active]) return;
+    const cat = panes[active].cfg.category;
+    const want = new Set([...watchFor(cat), panes[active].cfg.symbol].map((s) => cat + '|tickers.' + s));
+    for (const [k, v] of watchWsSubs) {
+      if (!want.has(k)) { hub.unsub(v.cat, v.topic, v.cb); watchWsSubs.delete(k); }
+    }
+    for (const s of new Set([...watchFor(cat), panes[active].cfg.symbol])) {
+      const topic = 'tickers.' + s, k = cat + '|' + topic;
+      if (watchWsSubs.has(k)) continue;
+      const cb = (m) => onTickerWs(s, m);
+      watchWsSubs.set(k, { cat, topic, cb });
+      hub.sub(cat, topic, cb);
+    }
+  }
   function renderWatch() {
+    if (!panes[active]) return;
     const cat = panes[active].cfg.category, f = $('#watchFilter').value.trim().toUpperCase();
     const sel = panes[active].cfg.symbol;
-    $('#watchList').innerHTML = watchFor(cat).filter((s) => s.includes(f)).map((s) => {
-      const t = tickers[s], chg = t ? (t.chg24 * 100) : null;
-      return `<div class="wrow${s === sel ? ' sel' : ''}" data-s="${s}"><span>${s}</span><span class="${chg >= 0 ? 'up' : 'dn'}">${t ? t.last + ' ' + chg.toFixed(2) + '%' : ''}</span></div>`;
-    }).join('');
+    let items = watchFor(cat).filter((s) => s.includes(f) && (watchFlagFilter === 'all' || flagFor(cat, s) === watchFlagFilter));
+    if (watchSort.col) {
+      items = items.slice().sort((a, b) => {
+        if (watchSort.col === 'symbol') return a.localeCompare(b) * watchSort.dir;
+        const va = tickers[a] ? tickers[a][watchSort.col] ?? -Infinity : -Infinity;
+        const vb = tickers[b] ? tickers[b][watchSort.col] ?? -Infinity : -Infinity;
+        return (va - vb) * watchSort.dir;
+      });
+    }
+    $('#watchList').innerHTML = items.map((s) => {
+      const t = tickers[s], chg = t ? (t.chg24 * 100) : null, fl = flagFor(cat, s);
+      const bar = fl ? `<span class="wflag-bar" style="background:${FLAG_COLORS[fl]}"></span>` : '';
+      return `<div class="wrow${s === sel ? ' sel' : ''}" data-s="${s}"><span>${bar}${s}</span><span class="wv ${chg >= 0 ? 'up' : 'dn'}">${t ? t.last + ' ' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%' : ''}</span></div>`;
+    }).join('') || '<div style="padding:10px;color:var(--mut);text-align:center">Пусто</div>';
   }
   async function pollTickers() {
     if (!panes[active]) return;
     const cat = panes[active].cfg.category;
     const syms = new Set(watchFor(cat)); syms.add(panes[active].cfg.symbol);
-    try { tickers = await api('tickers', { category: cat, symbols: [...syms].join(',') }); renderWatch(); updateInfo(); } catch { /* retry */ }
+    try {
+      const fresh = await api('tickers', { category: cat, symbols: [...syms].join(',') });
+      for (const [k, v] of Object.entries(fresh)) tickers[k] = { ...(tickers[k] || {}), ...v };
+      renderWatch(); updateInfo(); syncWatchWs();
+    } catch { /* retry */ }
   }
   function updateInfo() {
     const c = panes[active].cfg, t = tickers[c.symbol];
@@ -1402,15 +1474,20 @@
       $('#tabWatch').classList.toggle('on', tab === 'watch');
       $('#tabObj').classList.toggle('on', tab === 'obj');
       $('#tabAlerts').classList.toggle('on', tab === 'alerts');
+      $('#tabDom').classList.toggle('on', tab === 'dom');
       $('#watchPan').classList.toggle('hidden', tab !== 'watch');
       $('#objTreePan').classList.toggle('hidden', tab !== 'obj');
       $('#alertsPan').classList.toggle('hidden', tab !== 'alerts');
+      $('#domPan').classList.toggle('hidden', tab !== 'dom');
       if (tab === 'obj') renderObjTree();
       if (tab === 'alerts') refreshAlerts(false);
+      const c = panes[active] && panes[active].cfg;
+      PMTMarket.setDomVisible(tab === 'dom', c && c.category, c && c.symbol);
     };
     $('#tabWatch').onclick = () => setSideTab('watch');
     $('#tabObj').onclick = () => setSideTab('obj');
     $('#tabAlerts').onclick = () => setSideTab('alerts');
+    $('#tabDom').onclick = () => setSideTab('dom');
     $('#objTree').onclick = (e) => {
       const p = panes[active]; if (!p) return;
       const cmp = e.target.closest('[data-ot-cmp]');
@@ -1622,7 +1699,7 @@ if showLabels and ta.crossunder(close, ma)
   }
 
   // ---------- strategy tester ----------
-  let tChart = null, tLast = null, tShown = 0;
+  let tChart = null, tLast = null, tShown = 0, tPctMode = false, tTab = 'over';
   const nf = (x, d = 2) => (x === null || x === undefined || Number.isNaN(x) ? '—' : Number(x).toLocaleString('ru-RU', { maximumFractionDigits: d, minimumFractionDigits: d }));
   const fdt = (t) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
   const tMsg = (t, bad) => { const el = $('#testMsg'); el.textContent = t || ''; el.className = bad ? 'dn' : 'up'; };
@@ -1638,31 +1715,87 @@ if showLabels and ta.crossunder(close, ma)
     if (!d.info.isStrategy) { $('#tInputs').innerHTML = '<div class="dn">Это индикатор: в скрипте нет strategy(...). Тестер работает со стратегиями.</div>'; return; }
     $('#tInputs').innerHTML = d.info.inputs.map((q) => renderMqlInput(q, q.default, `data-ti="${esc(q.name)}"`)).join('') || '';
   }
+  function renderTesterPerf(r) {
+    const m = r.metrics, l = m.long || m, s = m.short || m;
+    const fSigned = (v, d = 2, suf = '') => `<span class="${v >= 0 ? 'up' : 'dn'}">${nf(v, d)}${suf}</span>`;
+    const rows = [
+      ['Чистая прибыль', fSigned(m.netProfit), fSigned(l.netProfit), fSigned(s.netProfit)],
+      ['Валовая прибыль', nf(m.grossProfit), nf(l.grossProfit), nf(s.grossProfit)],
+      ['Валовый убыток', nf(m.grossLoss), nf(l.grossLoss), nf(s.grossLoss)],
+      ['Сделок', m.trades, l.trades, s.trades],
+      ['Прибыль / Убыток', `${m.wins} / ${m.losses}`, `${l.wins} / ${l.losses}`, `${s.wins} / ${s.losses}`],
+      ['Win Rate', nf(m.winRate, 1) + '%', nf(l.winRate, 1) + '%', nf(s.winRate, 1) + '%'],
+      ['Profit Factor', m.profitFactor === null ? '∞' : nf(m.profitFactor, 3), l.profitFactor === null ? '∞' : nf(l.profitFactor, 3), s.profitFactor === null ? '∞' : nf(s.profitFactor, 3)],
+      ['Средняя сделка (EV)', nf(m.avgTrade), nf(l.avgTrade), nf(s.avgTrade)],
+      ['Средняя прибыль', nf(m.avgWin), nf(l.avgWin), nf(s.avgWin)],
+      ['Средний убыток', nf(m.avgLoss), nf(l.avgLoss), nf(s.avgLoss)],
+      ['Risk / Reward', m.riskReward === null ? '—' : nf(m.riskReward), l.riskReward === null ? '—' : nf(l.riskReward), s.riskReward === null ? '—' : nf(s.riskReward)],
+      ['Макс. победа', nf(m.largestWin), nf(l.largestWin), nf(s.largestWin)],
+      ['Макс. убыток', nf(m.largestLoss), nf(l.largestLoss), nf(s.largestLoss)],
+      ['Макс. серия побед / пор.', `${m.maxConsecWins} / ${m.maxConsecLosses}`, `${l.maxConsecWins} / ${l.maxConsecLosses}`, `${s.maxConsecWins} / ${s.maxConsecLosses}`],
+      ['Сред. баров в сделке', nf(m.avgBarsInTrade, 1), nf(l.avgBarsInTrade, 1), nf(s.avgBarsInTrade, 1)],
+    ];
+    $('#tPerfTable').innerHTML = `<table class="perf-tbl"><thead><tr><th>Показатель</th><th>Все</th><th>Long</th><th>Short</th></tr></thead><tbody>`
+      + rows.map(([k, a, b, c]) => `<tr><td>${k}</td><td>${a}</td><td>${b}</td><td>${c}</td></tr>`).join('')
+      + `<tr><td>Sharpe / Sortino</td><td colspan="3">${m.sharpe === null ? '—' : nf(m.sharpe, 2)} / ${m.sortino === null ? '—' : nf(m.sortino, 2)}</td></tr>`
+      + `<tr><td>CAGR / Recovery</td><td colspan="3">${m.cagr === null ? '—' : nf(m.cagr, 1) + '%'} / ${m.recoveryFactor === null ? '—' : nf(m.recoveryFactor, 2)}</td></tr>`
+      + `<tr><td>Макс. просадка / Run-up</td><td colspan="3"><span class="dn">${nf(m.maxDrawdownPct)}%</span> (${nf(m.maxDrawdown)}) / <span class="up">${nf(m.maxRunUpPct)}%</span> (${nf(m.maxRunUp)})</td></tr>`
+      + `<tr><td>Экспозиция / Комиссии / Buy&amp;Hold</td><td colspan="3">${nf(m.exposurePct, 1)}% · ${nf(m.commissionPaid)} · ${nf(m.buyHoldPct)}%</td></tr>`
+      + '</tbody></table>';
+  }
   function tShowResult(r) {
     tLast = r; const m = r.metrics, cls = (v) => (v >= 0 ? 'up' : 'dn');
     $('#tMetrics').innerHTML = [
-      ['Чистая прибыль', `<span class="${cls(m.netProfit)}">${nf(m.netProfit)} (${nf(m.netProfitPct)}%)</span>`], ['Итоговый капитал', nf(m.finalEquity)], ['Сделок', m.trades], ['Win rate', nf(m.winRate, 1) + '%'],
-      ['Profit factor', m.profitFactor === null ? '∞' : nf(m.profitFactor, 3)], ['Макс. просадка', `<span class="dn">${nf(m.maxDrawdownPct)}%</span> (${nf(m.maxDrawdown)})`], ['Средняя прибыль', nf(m.avgWin)], ['Средний убыток', nf(m.avgLoss)],
-      ['Risk/Reward', m.riskReward === null ? '—' : nf(m.riskReward)], ['Комиссии', nf(m.commissionPaid)], ['Баров в сделке', nf(m.avgBarsInTrade, 1)], ['Buy & Hold', `${nf(m.buyHoldPct)}%`],
+      ['Чистая прибыль', `<span class="${cls(m.netProfit)}">${nf(m.netProfit)} (${nf(m.netProfitPct)}%)</span>`], ['Итоговый капитал', nf(m.finalEquity)],
+      ['Сделок (L/S)', `${m.trades} (${(m.long && m.long.trades) || 0}/${(m.short && m.short.trades) || 0})`], ['Win rate', nf(m.winRate, 1) + '%'],
+      ['Profit factor', m.profitFactor === null ? '∞' : nf(m.profitFactor, 3)], ['Макс. просадка', `<span class="dn">${nf(m.maxDrawdownPct)}%</span> (${nf(m.maxDrawdown)})`],
+      ['Макс. Run-up', `<span class="up">${nf(m.maxRunUpPct ?? 0)}%</span> (${nf(m.maxRunUp ?? 0)})`], ['Sharpe / Sortino', `${m.sharpe === null || m.sharpe === undefined ? '—' : nf(m.sharpe, 2)} / ${m.sortino === null || m.sortino === undefined ? '—' : nf(m.sortino, 2)}`],
+      ['Средняя прибыль', nf(m.avgWin)], ['Средний убыток', nf(m.avgLoss)], ['Risk/Reward', m.riskReward === null ? '—' : nf(m.riskReward)],
+      ['Комиссии', nf(m.commissionPaid)], ['Экспозиция / Баров', `${nf(m.exposurePct ?? 0, 1)}% · ${nf(m.avgBarsInTrade, 1)}`],
+      ['CAGR', m.cagr === null || m.cagr === undefined ? '—' : nf(m.cagr, 1) + '%'], ['Buy & Hold', `${nf(m.buyHoldPct)}%`],
     ].map(([k, v]) => `<div class="mc"><span>${k}</span><b>${v}</b></div>`).join('');
     if (tChart) { tChart.remove(); tChart = null; }
-    const t = chartTheme(), LC = LightweightCharts;
+    const t = chartTheme(), LC = LightweightCharts, cap = m.initialCapital || 1;
     tChart = LC.createChart($('#tChart'), { autoSize: true, layout: { background: { color: t.bg }, textColor: t.txt }, grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } }, timeScale: { timeVisible: true }, rightPriceScale: { borderColor: t.grid } });
     const eq = tChart.addSeries(LC.AreaSeries, { lineColor: '#2962ff', topColor: 'rgba(41,98,255,0.28)', bottomColor: 'rgba(41,98,255,0)', priceLineVisible: false });
-    const pts = r.equity.map(([time, value]) => ({ time, value })); eq.setData(pts);
+    const pts = r.equity.map(([time, value]) => ({ time, value: tPctMode ? ((value - cap) / cap) * 100 : value }));
+    eq.setData(pts);
+    if (Array.isArray(r.buyHold) && r.buyHold.length) {
+      const bh = tChart.addSeries(LC.LineSeries, { color: '#ff9800', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+      bh.setData(r.buyHold.map(([time, value]) => ({ time, value: tPctMode ? ((value - cap) / cap) * 100 : value })));
+    }
     let peak = -Infinity; const dd = tChart.addSeries(LC.HistogramSeries, { priceScaleId: 'dd', color: 'rgba(239,83,80,0.55)', priceLineVisible: false, lastValueVisible: false });
     dd.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    dd.setData(pts.map((p) => { peak = Math.max(peak, p.value); return { time: p.time, value: -((peak - p.value) / peak) * 100 }; }));
+    dd.setData(r.equity.map(([time, value]) => { peak = Math.max(peak, value); return { time, value: -((peak - value) / peak) * 100 }; }));
     tChart.timeScale().fitContent();
+    renderTesterPerf(r);
+    $('#tProps').innerHTML = `<div class="mgrid">${[
+      ['Символ', esc(r.symbol || '—')], ['Таймфрейм', esc(r.tf || '—')],
+      ['Период', `${fdt(r.from).slice(0, 10)} → ${fdt(r.to).slice(0, 10)}`], ['Баров', m.bars ?? r.bars ?? '—'],
+      ['Начальный капитал', nf(cap)], ['Открытых сделок', m.openTrades ?? 0],
+    ].map(([k, v]) => `<div class="mc"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
     tShown = 0; $('#tTrades').innerHTML = ''; tMoreTrades();
     tMsg(`#${r.testId} · ${r.symbol || ''}`.trim());
   }
   function tMoreTrades() {
     const r = tLast; if (!r) return; const rows = r.trades.slice().reverse().slice(tShown, tShown + 100);
-    if (!tShown) $('#tTrades').innerHTML = '<table><thead><tr><th>#</th><th>Напр.</th><th>Вход</th><th>Цена</th><th>Выход</th><th>Цена</th><th>Объём</th><th>P&L</th><th>Причина</th></tr></thead><tbody></tbody></table><button id="tMore" class="hidden">Показать ещё</button>';
+    if (!tShown) $('#tTrades').innerHTML = '<table><thead><tr><th>#</th><th>Напр.</th><th>Вход</th><th>Цена</th><th>Выход</th><th>Цена</th><th>Объём</th><th>P&L</th><th>MFE</th><th>MAE</th><th>Причина</th></tr></thead><tbody></tbody></table><button id="tMore" class="hidden">Показать ещё</button>';
     const body = $('#tTrades tbody');
-    body.insertAdjacentHTML('beforeend', rows.map((x, i) => `<tr><td>${r.trades.length - tShown - i}</td><td class="${x.dir > 0 ? 'up' : 'dn'}">${x.dir > 0 ? 'Long' : 'Short'}</td><td>${fdt(x.entryTime)}</td><td>${nf(x.entryPrice)}</td><td>${fdt(x.exitTime)}</td><td>${nf(x.exitPrice)}</td><td>${nf(x.qty, 4)}</td><td class="${x.net >= 0 ? 'up' : 'dn'}">${nf(x.net)}</td><td>${esc(x.exitComment || '')}</td></tr>`).join(''));
+    body.insertAdjacentHTML('beforeend', rows.map((x, i) => `<tr data-tbar="${x.entryTime}" style="cursor:pointer" title="Кликните, чтобы перейти к бару входа на графике"><td>${r.trades.length - tShown - i}</td><td class="${x.dir > 0 ? 'up' : 'dn'}">${x.dir > 0 ? 'Long' : 'Short'}</td><td>${fdt(x.entryTime)}</td><td>${nf(x.entryPrice)}</td><td>${fdt(x.exitTime)}</td><td>${nf(x.exitPrice)}</td><td>${nf(x.qty, 4)}</td><td class="${x.net >= 0 ? 'up' : 'dn'}">${nf(x.net)}</td><td class="up">${x.mfe !== undefined ? nf(x.mfe) : '—'}</td><td class="dn">${x.mae !== undefined ? nf(x.mae) : '—'}</td><td>${esc(x.exitComment || '')}</td></tr>`).join(''));
     tShown += rows.length; const more = $('#tMore'); more.classList.toggle('hidden', tShown >= r.trades.length); more.onclick = tMoreTrades;
+  }
+  function exportTesterCsv() {
+    if (!tLast || !tLast.trades || !tLast.trades.length) { tMsg('Нет сделок для экспорта', true); return; }
+    const escCsv = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = ['#', 'Dir', 'EntryTime', 'EntryPrice', 'ExitTime', 'ExitPrice', 'Qty', 'Net', 'MFE', 'MAE', 'Comment'];
+    const lines = [head.join(',')];
+    tLast.trades.forEach((x, idx) => {
+      lines.push([idx + 1, x.dir > 0 ? 'Long' : 'Short', fdt(x.entryTime), x.entryPrice, fdt(x.exitTime), x.exitPrice, x.qty, x.net, x.mfe ?? '', x.mae ?? '', escCsv(x.exitComment || '')].join(','));
+    });
+    const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `trades_${tLast.symbol || 'test'}_${tLast.testId || ''}.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
   }
   async function tHistory() {
     const j = await call('GET', 'tester/history');
@@ -1677,6 +1810,29 @@ if showLabels and ta.crossunder(close, ma)
     };
     $('#testClose').onclick = () => $('#testDlg').classList.add('hidden');
     $('#testDlg').onmousedown = (e) => { if (e.target.id === 'testDlg') $('#testDlg').classList.add('hidden'); };
+    $('#testTabs').onclick = (e) => {
+      const b = e.target.closest('[data-tt]'); if (!b) return;
+      tTab = b.dataset.tt;
+      $('#testTabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+      $('#tPanOver').classList.toggle('hidden', tTab !== 'over');
+      $('#tPanPerf').classList.toggle('hidden', tTab !== 'perf');
+      $('#tPanTrades').classList.toggle('hidden', tTab !== 'trades');
+      $('#tPanProps').classList.toggle('hidden', tTab !== 'props');
+      if (tTab === 'over' && tChart) tChart.timeScale().fitContent();
+    };
+    $('#tPctMode').onclick = () => {
+      tPctMode = !tPctMode;
+      $('#tPctMode').classList.toggle('on', tPctMode);
+      if (tLast) tShowResult(tLast);
+    };
+    $('#tCsvBtn').onclick = exportTesterCsv;
+    $('#tTrades').onclick = (e) => {
+      const tr = e.target.closest('tr[data-tbar]');
+      if (!tr || !panes[active]) return;
+      const ts = +tr.dataset.tbar;
+      $('#testDlg').classList.add('hidden');
+      panes[active].goToTime(ts);
+    };
     $('#tScript').onchange = () => tDescribe().catch((e) => tMsg(e.message, true));
     $('#tHist').onclick = async (e) => {
       const del = e.target.dataset.tdel; if (del) { await call('DELETE', 'tester/' + del); tHistory(); return; }
@@ -1961,11 +2117,88 @@ if showLabels and ta.crossunder(close, ma)
     $('#theme').value = state.theme; $('#theme').onchange = (e) => { state.theme = e.target.value; document.body.classList.toggle('light', state.theme === 'light'); panes.forEach((p) => p.applyTheme()); save(); };
     document.body.classList.toggle('light', state.theme === 'light');
     $('#watchFilter').oninput = renderWatch;
+    $('#watchAddBtn').onclick = () => {
+      const cat = panes[active] ? panes[active].cfg.category : state.category;
+      PMTUx.openSymbolSearch({
+        mode: 'symbol',
+        defaultCat: cat,
+        onPick: (item) => {
+          const w = watchFor(item.category);
+          if (!w.includes(item.symbol)) w.push(item.symbol);
+          save(); renderWatch(); syncWatchWs(); pollTickers();
+          PMTUx.toast(`${item.symbol} добавлен в Watchlist`, 'ok');
+        },
+      });
+    };
+    $('#watchFlags').onclick = (e) => {
+      const b = e.target.closest('[data-wf]'); if (!b) return;
+      watchFlagFilter = b.dataset.wf;
+      $('#watchFlags').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+      renderWatch();
+    };
+    $('#watchCols').onclick = (e) => {
+      const sp = e.target.closest('[data-ws]'); if (!sp) return;
+      const col = sp.dataset.ws;
+      if (watchSort.col === col) {
+        if (watchSort.dir === 1) watchSort.dir = -1;
+        else watchSort = { col: null, dir: 1 };
+      } else { watchSort = { col, dir: col === 'symbol' ? 1 : -1 }; }
+      const labels = { symbol: 'Символ', last: 'Цена', chg24: '24ч %' };
+      $('#watchCols').querySelectorAll('[data-ws]').forEach((el) => {
+        const k = el.dataset.ws;
+        el.textContent = labels[k] + (watchSort.col === k ? (watchSort.dir > 0 ? ' ↑' : ' ↓') : '');
+      });
+      renderWatch();
+    };
     $('#watchList').onclick = (e) => { const r = e.target.closest('.wrow'); if (r) applyToPanes({ symbol: r.dataset.s }); };
+    document.addEventListener('mousedown', (e) => { if (watchMenu && !e.target.closest('.ctxmenu')) hideWatchMenu(); });
     $('#watchList').oncontextmenu = (e) => {
       const r = e.target.closest('.wrow'); if (!r) return; e.preventDefault();
-      const cat = panes[active].cfg.category; state.watch[cat] = watchFor(cat).filter((s) => s !== r.dataset.s); save(); renderWatch();
+      hideWatchMenu();
+      const cat = panes[active].cfg.category, sym = r.dataset.s, cur = flagFor(cat, sym);
+      const m = document.createElement('div'); m.className = 'ctxmenu';
+      const opts = [['red', '🔴 Красный'], ['green', '🟢 Зелёный'], ['blue', '🔵 Синий'], ['orange', '🟠 Оранжевый'], ['purple', '🟣 Фиолетовый']];
+      m.innerHTML = opts.map(([k, lbl]) => `<div class="mi${cur === k ? ' on' : ''}" data-wfset="${k}">${lbl}</div>`).join('')
+        + (cur ? '<div class="mi" data-wfset="">Снять флаг</div>' : '')
+        + '<div class="mi" data-wrem="1" style="color:var(--dn)">✕ Удалить из списка</div>';
+      m.style.left = Math.min(e.clientX, window.innerWidth - 190) + 'px';
+      m.style.top = Math.min(e.clientY, window.innerHeight - 230) + 'px';
+      document.body.appendChild(m);
+      watchMenu = m;
+      m.onclick = (ev) => {
+        const fl = ev.target.closest('[data-wfset]');
+        if (fl) { setWatchFlag(cat, sym, fl.dataset.wfset); hideWatchMenu(); return; }
+        if (ev.target.closest('[data-wrem]')) {
+          state.watch[cat] = watchFor(cat).filter((s) => s !== sym);
+          save(); renderWatch(); syncWatchWs(); hideWatchMenu();
+        }
+      };
     };
+    PMTMarket.wireDom({
+      sub: (cat, topic, cb) => hub.sub(cat, topic, cb),
+      unsub: (cat, topic, cb) => hub.unsub(cat, topic, cb),
+      toast: (msg, kind) => PMTUx.toast(msg, kind),
+      alertAt: (price) => {
+        const c = panes[active] && panes[active].cfg;
+        if (c) openAlertModal({ category: c.category, symbol: c.symbol, tf: c.tf, price });
+      },
+    });
+    PMTMarket.wireScreener({
+      api,
+      activeCategory: () => (panes[active] ? panes[active].cfg.category : state.category),
+      addWatch: (cat, sym) => {
+        const w = watchFor(cat);
+        if (!w.includes(sym)) { w.push(sym); save(); renderWatch(); syncWatchWs(); pollTickers(); }
+        PMTUx.toast(`${sym} добавлен в Watchlist`, 'ok');
+      },
+      pickSymbol: (cat, sym) => {
+        const w = watchFor(cat);
+        if (!w.includes(sym)) w.push(sym);
+        state.category = cat;
+        applyToPanes({ category: cat, symbol: sym });
+        pollTickers();
+      },
+    });
     const togg = (btn, el, key) => { const on = state[key]; $(btn).classList.toggle('on', on); $(el).classList.toggle('hidden', !on); $(btn).onclick = () => { state[key] = !state[key]; $(btn).classList.toggle('on', state[key]); $(el).classList.toggle('hidden', !state[key]); save(); panes.forEach((p) => p.chart.resize(p.cv.clientWidth, p.cv.clientHeight)); }; };
     togg('#togWatch', '#watch', 'showWatch'); togg('#togInfo', '#info', 'showInfo');
     const legTog = () => { document.body.classList.toggle('nolegend', !state.showLegend); $('#togLegend').classList.toggle('on', state.showLegend); };
@@ -1977,7 +2210,7 @@ if showLabels and ta.crossunder(close, ma)
     $('#category').value = first.category;
     loadSymbols(first.category).catch(() => {}).finally(() => {
       ensureLayout(); refreshAlerts(true); pollTickers();
-      setInterval(pollTickers, 3000);
+      setInterval(pollTickers, 5000);
       setInterval(pollAlertLogs, 6000);
       setInterval(() => panes.forEach((p) => p.tickCountdown()), 1000);
       window.addEventListener('beforeunload', save);

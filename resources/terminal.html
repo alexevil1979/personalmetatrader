@@ -70,6 +70,7 @@
   <button id="btnTest" title="Тестер стратегий (Pine strategy)">Тестер</button>
   <button id="btnMql" title="Редактор Pine Script и MQL4/MQL5">&lt;/&gt; Редактор</button>
   <button id="btnInd" title="Индикаторы">ƒ Индикаторы</button>
+  <button id="btnScreener" title="Крипто-скринер Bybit">🔍 Скринер</button>
   <button id="btnAlert" title="Создать алерт (Alt+A)">🔔 Алерт</button>
   <button id="btnLevels" title="Поставить два уровня уведомлений: выше и ниже текущей цены (±1%)">⇕ Уровни</button>
   <button id="btnSettings" title="Настройки: профиль и уведомления">⚙ Настройки</button>
@@ -87,11 +88,25 @@
         <button id="tabWatch" class="on">Обзор</button>
         <button id="tabObj">Объекты</button>
         <button id="tabAlerts">Алерты</button>
+        <button id="tabDom">Стакан</button>
       </div>
       <button id="watchClose" title="Скрыть панель (кнопка «Обзор» в шапке вернёт её)">✕</button>
     </div>
     <div id="watchPan">
-      <input id="watchFilter" placeholder="Фильтр">
+      <div class="wbar"><input id="watchFilter" placeholder="Фильтр"><button id="watchAddBtn" title="Добавить символ в Watchlist">+</button></div>
+      <div id="watchFlags" class="wflags">
+        <button data-wf="all" class="on">Все</button>
+        <button data-wf="red" class="wf-dot wf-red" title="Красный"></button>
+        <button data-wf="green" class="wf-dot wf-green" title="Зелёный"></button>
+        <button data-wf="blue" class="wf-dot wf-blue" title="Синий"></button>
+        <button data-wf="orange" class="wf-dot wf-orange" title="Оранжевый"></button>
+        <button data-wf="purple" class="wf-dot wf-purple" title="Фиолетовый"></button>
+      </div>
+      <div id="watchCols" class="wcols">
+        <span data-ws="symbol">Символ</span>
+        <span data-ws="last">Цена</span>
+        <span data-ws="chg24">24ч %</span>
+      </div>
       <div id="watchList"></div>
     </div>
     <div id="objTreePan" class="hidden">
@@ -100,6 +115,12 @@
     <div id="alertsPan" class="hidden">
       <div id="alertsTools"><button id="alNewBtn" class="btnpri">+ Новый алерт</button></div>
       <div id="alertsList"></div>
+    </div>
+    <div id="domPan" class="hidden">
+      <div class="ot-sec">Стакан (Order Book)</div>
+      <div id="domBook"></div>
+      <div class="ot-sec">Лента сделок (Trades)</div>
+      <div id="domTrades"></div>
     </div>
   </aside>
   <div id="workCol">
@@ -229,7 +250,23 @@
       <button id="tRun" class="on">Запустить тест</button><button id="tOnChart" title="Показать входы/выходы на графике">Сделки на график</button>
       <div class="sub">История</div><div id="tHist"></div>
     </div>
-    <div id="testMain"><div id="tMetrics" class="mgrid"></div><div id="tChart"></div><div id="tTrades"></div></div>
+    <div id="testMain">
+      <div class="dlgrow" style="margin-bottom:2px">
+        <div id="testTabs" class="symtabs" style="padding:0;border:none">
+          <button data-tt="over" class="on">Обзор</button>
+          <button data-tt="perf">Сводка</button>
+          <button data-tt="trades">Список сделок</button>
+          <button data-tt="props">Свойства</button>
+        </div>
+        <span class="grow"></span>
+        <button id="tPctMode" title="Переключить шкалу кривой: $ или %">$ / %</button>
+        <button id="tCsvBtn" title="Экспорт сделок в CSV">CSV</button>
+      </div>
+      <div id="tPanOver" class="tpan"><div id="tMetrics" class="mgrid"></div><div id="tChart"></div></div>
+      <div id="tPanPerf" class="tpan hidden"><div id="tPerfTable"></div></div>
+      <div id="tPanTrades" class="tpan hidden"><div id="tTrades"></div></div>
+      <div id="tPanProps" class="tpan hidden"><div id="tProps"></div></div>
+    </div>
   </div>
 </div></div>
 
@@ -315,6 +352,35 @@
   </div>
 </div></div>
 
+<div id="screenerDlg" class="dlg hidden"><div class="dlgbox scrbox">
+  <div class="dlghead"><b>🔍 Крипто-скринер Bybit</b> <span id="scrMeta" style="color:var(--mut)"></span><button id="scrClose">✕</button></div>
+  <div class="dlgrow">
+    <select id="scrCat"><option value="linear">USDT/USDC Perp</option><option value="spot">Spot</option><option value="inverse">Inverse</option></select>
+    <input id="scrQ" placeholder="Фильтр символа…" style="width:140px">
+    <select id="scrMinTurn" title="Мин. оборот 24ч"><option value="0">Любой оборот</option><option value="1000000">&gt; $1M</option><option value="10000000">&gt; $10M</option><option value="50000000">&gt; $50M</option><option value="100000000">&gt; $100M</option></select>
+    <button id="scrRefresh">Обновить</button>
+    <label class="chk"><input type="checkbox" id="scrAuto" checked> авто 5с</label>
+  </div>
+  <div id="scrPresets" class="symtabs" style="padding:0 0 6px">
+    <button data-sp="turn" class="on">Топ оборота</button>
+    <button data-sp="gain">Топ роста (+2%)</button>
+    <button data-sp="loss">Топ падения (-2%)</button>
+    <button data-sp="fpos">Funding +</button>
+    <button data-sp="fneg">Funding -</button>
+    <button data-sp="vol">Волатильные</button>
+  </div>
+  <div class="scr-wrap">
+    <table class="scr-tbl">
+      <thead id="scrHead"><tr>
+        <th data-ssort="symbol">Символ</th><th data-ssort="last">Цена</th><th data-ssort="chg24">24ч %</th>
+        <th data-ssort="turn24">Оборот 24ч</th><th data-ssort="rangePct">Диапазон</th>
+        <th data-ssort="funding">Funding</th><th data-ssort="oi">OI</th><th data-ssort="spreadPct">Спред</th><th></th>
+      </tr></thead>
+      <tbody id="scrBody"></tbody>
+    </table>
+  </div>
+</div></div>
+
 <div id="toastBox"></div>
 
 <script src="/assets/vendor/lightweight-charts.js"></script>
@@ -323,6 +389,7 @@
 <script src="/assets/pineview.js"></script>
 <script src="/assets/code_editor.js"></script>
 <script src="/assets/tv_ux.js"></script>
+<script src="/assets/market_panels.js"></script>
 <script src="/assets/terminal.js"></script>
 </body>
 </html>

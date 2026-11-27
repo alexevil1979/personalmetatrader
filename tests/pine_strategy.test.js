@@ -99,6 +99,44 @@ const tr = rc2.strategy.trades[0]; assert.strictEqual(tr.entryPrice, 11, 'filled
 assert.deepStrictEqual(rc2.plots[0].values, [0, 1, 1, 0, 0]); near(rc2.plots[1].values[2], 1001, 1e-9, 'equity incl. open profit'); near(rc2.strategy.metrics.netProfit, 2, 1e-9, 'net');
 console.log('OK exit semantics / position variables');
 
-// ---- 5) honest failures ----
-assert.throws(() => go(EX('trail_points=10, trail_offset=5'), mk([[1, 1, 1, 1], [1, 1, 1, 1]])), /trailing stops are not supported/);
+// ---- 5) trailing stops (trail_points / trail_offset, Long + Short), MAE/MFE, connector lines & pro metrics ----
+// Long: entry @ bar 1 open = 100; trail_points=500 (5.0 => activates @ 105), trail_offset=200 (2.0)
+// Bar 2 [100,108,107,108] activates @ 105, trails best=108 -> stop=106 (stays open)
+// Bar 3 [108,110,105,106]: (h-o)=2 < (o-l)=3 -> path O-H-L-C hits 110 -> best=110 -> stop=108 -> drops to 105, fills @ 108
+const rTrailL = go(EX('trail_points=500, trail_offset=200, comment_trailing="TR"'), mk([
+  [100, 100, 100, 100],
+  [100, 101, 99, 100],
+  [100, 108, 107, 108],
+  [108, 110, 105, 106],
+  [106, 106, 106, 106],
+]));
+assert.strictEqual(rTrailL.strategy.trades.length, 1, 'long trailing closed');
+const tl = rTrailL.strategy.trades[0];
+assert.strictEqual(tl.exitBar, 3);
+near(tl.exitPrice, 108, 1e-9, 'long trailing exit @ best - offset');
+assert.strictEqual(tl.exitComment, 'TR', 'comment_trailing used');
+assert.ok(tl.mfe > 0 && tl.mae < 0, 'MFE/MAE recorded');
+assert.strictEqual(rTrailL.lines.length, 1, 'trade connector line emitted');
+
+// Short: trail_price=95, trail_offset=200 (2.0)
+const rTrailS = go(`//@version=5
+strategy("s-trail", overlay=true, initial_capital=1000)
+if bar_index == 0
+    strategy.entry("S", strategy.short)
+strategy.exit("X", "S", trail_price=95, trail_offset=200, comment_trailing="STR")
+`, mk([
+  [100, 100, 100, 100],
+  [100, 101, 99, 100],
+  [100, 99, 92, 92],
+  [92, 96, 90, 95],
+]));
+assert.strictEqual(rTrailS.strategy.trades.length, 1, 'short trailing closed');
+near(rTrailS.strategy.trades[0].exitPrice, 92, 1e-9, 'short trailing fills @ best(90)+2');
+
+// Extended metrics check on 800-bar backtest
+assert.strictEqual(m.long.trades + m.short.trades, m.trades, 'Long + Short == All trades');
+assert.ok(Number.isFinite(m.sharpe) && Number.isFinite(m.sortino), 'Sharpe/Sortino computed');
+assert.ok(m.maxRunUp >= 0 && m.maxRunUpPct >= 0 && m.exposurePct > 0 && m.exposurePct <= 100, 'RunUp & Exposure valid');
+assert.strictEqual(r.lines.length, m.trades, 'one connector line per closed trade');
+console.log(`OK trailing stops + MAE/MFE + pro metrics (Sharpe ${m.sharpe.toFixed(2)}, RunUp ${m.maxRunUpPct.toFixed(1)}%)`);
 console.log('ALL PINE STRATEGY TESTS PASSED');
