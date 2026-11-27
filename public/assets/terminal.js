@@ -11,7 +11,7 @@
     setLocal(k, v) { try { localStorage.setItem('pmt.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
   };
 
-  const state = Object.assign({ category: 'linear', theme: 'dark', tz: 'UTC', layout: 1, sync: false, watch: {}, showWatch: true, showInfo: true, panes: [] }, {});
+  const state = Object.assign({ category: 'linear', theme: 'dark', tz: 'UTC', layout: 1, sync: false, watch: {}, showWatch: true, showInfo: true, showLegend: true, panes: [] }, {});
   const save = () => store.set('state', { ...state, panes: panes.map((p) => p.cfg) });
 
   let symbolsByCat = {};
@@ -901,6 +901,9 @@ if showLabels and ta.crossunder(close, ma)
     };
     const togg = (btn, el, key) => { const on = state[key]; $(btn).classList.toggle('on', on); $(el).classList.toggle('hidden', !on); $(btn).onclick = () => { state[key] = !state[key]; $(btn).classList.toggle('on', state[key]); $(el).classList.toggle('hidden', !state[key]); save(); panes.forEach((p) => p.chart.resize(p.cv.clientWidth, p.cv.clientHeight)); }; };
     togg('#togWatch', '#watch', 'showWatch'); togg('#togInfo', '#info', 'showInfo');
+    const legTog = () => { document.body.classList.toggle('nolegend', !state.showLegend); $('#togLegend').classList.toggle('on', state.showLegend); };
+    $('#togLegend').onclick = () => { state.showLegend = !state.showLegend; save(); legTog(); };
+    legTog();
     $('#watchClose').onclick = () => $('#togWatch').onclick();
 
     const first = state.panes[0] || { category: state.category, symbol: 'BTCUSDT', tf: '60', type: 'candles' };

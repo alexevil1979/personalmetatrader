@@ -34,6 +34,7 @@ main{flex:1;display:flex;min-height:0}
 .pane{position:relative;background:var(--bg);min-width:0;min-height:0}
 .pane.active{outline:1px solid var(--acc);outline-offset:-1px}
 .pane .ohlc{position:absolute;left:8px;top:6px;z-index:5;pointer-events:none;font-size:12px}
+body.nolegend .pane .ohlc{display:none}
 .pane .ohlc b{color:var(--acc)}
 .pane .cv{position:absolute;inset:0}
 .pane .load{position:absolute;right:70px;top:6px;z-index:5;color:var(--mut)}
