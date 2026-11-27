@@ -39,4 +39,49 @@ final class Client
         }
         throw new RuntimeException('Bybit: unavailable or rate limited');
     }
+
+    /** Deterministic Bybit V5 HMAC-SHA256 signature helper. */
+    public static function buildSign(string $ts, string $apiKey, string $recvWindow, string $qs, string $secret): string
+    {
+        return hash_hmac('sha256', $ts . $apiKey . $recvWindow . $qs, $secret);
+    }
+
+    /** Read-only authenticated Bybit V5 GET request (never submits write orders). */
+    public static function signedGet(string $path, array $query, string $apiKey, string $apiSecret, bool $testnet = false): array
+    {
+        $base = $testnet ? 'https://api-testnet.bybit.com' : rtrim(Env::get('BYBIT_REST', 'https://api.bybit.com'), '/');
+        $qs = http_build_query($query);
+        $url = $base . $path . ($qs !== '' ? '?' . $qs : '');
+        $ts = (string) (int) floor(microtime(true) * 1000);
+        $recv = '5000';
+        $sign = self::buildSign($ts, $apiKey, $recv, $qs, $apiSecret);
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json',
+                'X-BAPI-API-KEY: ' . $apiKey,
+                'X-BAPI-TIMESTAMP: ' . $ts,
+                'X-BAPI-RECV-WINDOW: ' . $recv,
+                'X-BAPI-SIGN: ' . $sign,
+            ],
+        ]);
+        $body = curl_exec($ch);
+        $err = curl_error($ch);
+        curl_close($ch);
+        if ($body === false) {
+            throw new RuntimeException('Bybit auth request failed: ' . $err);
+        }
+        $j = json_decode((string) $body, true);
+        if (!is_array($j)) {
+            throw new RuntimeException('Bybit: invalid response');
+        }
+        if (($j['retCode'] ?? -1) !== 0) {
+            throw new RuntimeException('Bybit (' . ($j['retCode'] ?? -1) . '): ' . ($j['retMsg'] ?? 'error'));
+        }
+        return $j['result'] ?? [];
+    }
 }

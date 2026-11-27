@@ -11,7 +11,9 @@ use PMT\Core\Cache;
 use PMT\Core\Crypto;
 use PMT\Core\Db;
 use PMT\Core\Env;
+use PMT\Core\ExchangeCreds;
 use PMT\Core\Log;
+use PMT\Core\Paper;
 use PMT\Core\Tg;
 use PMT\Mql\Scripts;
 use PMT\Mql\Tester;
@@ -266,6 +268,14 @@ final class Api
         }
         if ($path === '/api/alerts' || $path === '/api/alerts/recent' || preg_match('#^/api/alerts/(\d+)$#', $path, $am)) {
             self::alerts($path, $method, $uid, isset($am[1]) ? (int) $am[1] : null);
+            return;
+        }
+        if (str_starts_with($path, '/api/paper')) {
+            self::paper($path, $method, $uid);
+            return;
+        }
+        if (str_starts_with($path, '/api/exchange/bybit')) {
+            self::exchange($path, $method, $uid);
             return;
         }
         switch ($path) {
@@ -648,5 +658,81 @@ final class Api
             return;
         }
         self::out(['error' => 'method'], 405);
+    }
+
+    private static function paper(string $path, string $method, int $uid): void
+    {
+        if ($path === '/api/paper' && $method === 'GET') {
+            self::out(Paper::account($uid));
+            return;
+        }
+        if ($path === '/api/paper/order' && $method === 'POST') {
+            self::out(Paper::placeOrder($uid, self::body(4096)));
+            return;
+        }
+        if (preg_match('#^/api/paper/order/(\d+)$#', $path, $m) && $method === 'DELETE') {
+            self::out(Paper::cancelOrder($uid, (int) $m[1]));
+            return;
+        }
+        if (preg_match('#^/api/paper/position/(\d+)/close$#', $path, $m) && $method === 'POST') {
+            $b = file_get_contents('php://input') ? self::body(2048) : [];
+            $ref = !empty($b['replay']) && isset($b['ref_price']) ? (float) $b['ref_price'] : null;
+            self::out(Paper::closePosition($uid, (int) $m[1], $ref));
+            return;
+        }
+        if (preg_match('#^/api/paper/position/(\d+)$#', $path, $m) && $method === 'PUT') {
+            $b = self::body(2048);
+            self::out(Paper::updatePositionSlTp($uid, (int) $m[1], $b['sl'] ?? null, $b['tp'] ?? null));
+            return;
+        }
+        if ($path === '/api/paper/tick' && $method === 'POST') {
+            $b = self::body(2048);
+            self::out(Paper::triggerPrice(
+                $uid,
+                (string) ($b['category'] ?? 'linear'),
+                strtoupper(trim((string) ($b['symbol'] ?? ''))),
+                (float) ($b['high'] ?? 0),
+                (float) ($b['low'] ?? 0),
+                (float) ($b['close'] ?? 0)
+            ));
+            return;
+        }
+        if ($path === '/api/paper/reset' && $method === 'POST') {
+            $b = file_get_contents('php://input') ? self::body(2048) : [];
+            self::out(Paper::reset($uid, isset($b['balance']) ? (float) $b['balance'] : 100000.0));
+            return;
+        }
+        self::out(['error' => 'not found'], 404);
+    }
+
+    private static function exchange(string $path, string $method, int $uid): void
+    {
+        if ($path === '/api/exchange/bybit') {
+            if ($method === 'GET') {
+                self::out(ExchangeCreds::get($uid));
+                return;
+            }
+            if ($method === 'PUT') {
+                $b = self::body(2048);
+                self::out(ExchangeCreds::save($uid, (string) ($b['api_key'] ?? ''), (string) ($b['api_secret'] ?? ''), !empty($b['testnet'])));
+                return;
+            }
+            if ($method === 'DELETE') {
+                ExchangeCreds::delete($uid);
+                self::out(['ok' => true]);
+                return;
+            }
+            self::out(['error' => 'method'], 405);
+            return;
+        }
+        if ($path === '/api/exchange/bybit/portfolio' && $method === 'GET') {
+            if (!Cache::rateLimit('bybit_port:' . $uid, 15)) {
+                self::out(['error' => 'rate limit'], 429);
+                return;
+            }
+            self::out(ExchangeCreds::portfolio($uid));
+            return;
+        }
+        self::out(['error' => 'not found'], 404);
     }
 }

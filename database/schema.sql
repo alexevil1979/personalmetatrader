@@ -334,3 +334,66 @@ CREATE TABLE IF NOT EXISTS alert_logs (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
+
+-- Paper Trading simulator tables
+CREATE TABLE IF NOT EXISTS paper_accounts (
+  user_id INT UNSIGNED PRIMARY KEY,
+  balance DECIMAL(20,6) NOT NULL DEFAULT 100000.000000,
+  initial_balance DECIMAL(20,6) NOT NULL DEFAULT 100000.000000,
+  commission_pct DECIMAL(8,5) NOT NULL DEFAULT 0.05500,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS paper_orders (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  category VARCHAR(16) NOT NULL,
+  symbol VARCHAR(32) NOT NULL,
+  side ENUM('buy','sell') NOT NULL,
+  order_type ENUM('market','limit','stop') NOT NULL,
+  qty DECIMAL(24,8) NOT NULL,
+  price DECIMAL(24,10) NULL,
+  sl DECIMAL(24,10) NULL,
+  tp DECIMAL(24,10) NULL,
+  status ENUM('open','filled','canceled') NOT NULL DEFAULT 'open',
+  fill_price DECIMAL(24,10) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  filled_at DATETIME NULL,
+  KEY ix_po_user (user_id, status),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS paper_positions (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  category VARCHAR(16) NOT NULL,
+  symbol VARCHAR(32) NOT NULL,
+  side ENUM('long','short') NOT NULL,
+  qty DECIMAL(24,8) NOT NULL,
+  entry_price DECIMAL(24,10) NOT NULL,
+  sl DECIMAL(24,10) NULL,
+  tp DECIMAL(24,10) NULL,
+  opened_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_pp_pos (user_id, category, symbol),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS paper_trades (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  category VARCHAR(16) NOT NULL,
+  symbol VARCHAR(32) NOT NULL,
+  side ENUM('long','short') NOT NULL,
+  qty DECIMAL(24,8) NOT NULL,
+  entry_price DECIMAL(24,10) NOT NULL,
+  exit_price DECIMAL(24,10) NOT NULL,
+  commission DECIMAL(20,6) NOT NULL DEFAULT 0.000000,
+  pnl DECIMAL(20,6) NOT NULL,
+  reason VARCHAR(40) NOT NULL DEFAULT 'manual',
+  opened_at DATETIME NOT NULL,
+  closed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_pt_user (user_id, closed_at),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+

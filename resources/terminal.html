@@ -67,6 +67,8 @@
   <select id="tz" title="Часовой пояс"><option value="UTC">UTC</option><option value="local">Локальное</option></select>
   <select id="theme" title="Тема"><option value="dark">Тёмная</option><option value="light">Светлая</option></select>
   <span class="grow"></span>
+  <button id="btnReplay" title="Симулятор рынка (Bar Replay)">⏪ Симулятор</button>
+  <button id="btnPaper" title="Демо-торговля и портфель Bybit">💼 Торговля</button>
   <button id="btnTest" title="Тестер стратегий (Pine strategy)">Тестер</button>
   <button id="btnMql" title="Редактор Pine Script и MQL4/MQL5">&lt;/&gt; Редактор</button>
   <button id="btnInd" title="Индикаторы">ƒ Индикаторы</button>
@@ -124,6 +126,21 @@
     </div>
   </aside>
   <div id="workCol">
+    <div id="replayBar" class="hidden">
+      <span class="rp-badge">⏪ СИМУЛЯТОР</span>
+      <button id="rpCutBtn" type="button" title="Выбрать стартовый бар на графике">✂ Выбрать бар</button>
+      <button id="rpPlayBtn" type="button" title="Пуск / Пауза">▶</button>
+      <button id="rpStepBtn" type="button" title="Следующий бар">+1 бар</button>
+      <select id="rpSpeed" title="Скорость воспроизведения">
+        <option value="1200">0.5x</option>
+        <option value="700" selected>1x</option>
+        <option value="350">2x</option>
+        <option value="150">5x</option>
+      </select>
+      <span id="rpInfo" style="color:var(--mut)">Выберите бар на графике…</span>
+      <span class="grow"></span>
+      <button id="rpExitBtn" type="button">✕ Выйти</button>
+    </div>
     <section id="charts"></section>
     <section id="bottomDock" class="hidden">
       <div id="dockResizer" title="Потяните для изменения высоты"></div>
@@ -132,6 +149,7 @@
           <button data-dt="editor" class="on">Pine / MQL Редактор</button>
           <button data-dt="console">Консоль (<span id="conCnt">0</span>)</button>
           <button data-dt="tester">Тестер</button>
+          <button data-dt="paper">Торговая панель</button>
         </div>
         <span id="mqlMsg"></span>
         <div class="dock-acts">
@@ -174,6 +192,46 @@
           <div style="padding:14px;display:flex;align-items:center;gap:12px">
             <span>Запуск и аналитика стратегий Pine Script</span>
             <button id="dockOpenTester" class="btnpri">Открыть Тестер стратегий</button>
+          </div>
+        </div>
+        <div id="dockPanPaper" class="dock-pan hidden">
+          <div class="pp-top">
+            <div id="paperSummary" class="pp-sum"></div>
+            <div class="dock-tabs" id="ppSubTabs">
+              <button data-pt="pos" class="on">Позиции (<span id="ppPosCnt">0</span>)</button>
+              <button data-pt="ord">Ордера (<span id="ppOrdCnt">0</span>)</button>
+              <button data-pt="hist">История</button>
+              <button data-pt="bybit">Bybit Read-Only</button>
+            </div>
+          </div>
+          <div class="pp-body">
+            <div class="pp-ticket">
+              <div class="pp-sides">
+                <button id="ppSideBuy" class="pp-buy on" type="button">Купить / Long</button>
+                <button id="ppSideSell" class="pp-sell" type="button">Продать / Short</button>
+              </div>
+              <div class="pp-grid">
+                <label>Тип <select id="ppType"><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop</option></select></label>
+                <label>Кол-во <input id="ppQty" type="number" step="any" value="0.01" min="0.0001"></label>
+                <label id="ppPriceWrap" class="hidden">Цена <input id="ppPrice" type="number" step="any"></label>
+                <label>Stop Loss <input id="ppSl" type="number" step="any" placeholder="необяз."></label>
+                <label>Take Profit <input id="ppTp" type="number" step="any" placeholder="необяз."></label>
+              </div>
+              <button id="ppSubmit" class="btnpri" type="button" style="width:100%">Отправить ордер</button>
+            </div>
+            <div class="pp-tables">
+              <div id="ppTabPos" class="pp-tab"></div>
+              <div id="ppTabOrd" class="pp-tab hidden"></div>
+              <div id="ppTabHist" class="pp-tab hidden"></div>
+              <div id="ppTabBybit" class="pp-tab hidden">
+                <div class="dlgrow" style="margin-bottom:6px">
+                  <button id="ppBybitLoad" type="button">Обновить портфель Bybit</button>
+                  <button id="ppBybitCfg" type="button">⚙ Настроить ключи</button>
+                  <span id="ppBybitMeta" style="color:var(--mut)"></span>
+                </div>
+                <div id="ppBybitBody"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -283,6 +341,7 @@
   <div class="settabs">
     <button id="setTabProfile" class="settab on">Профиль</button>
     <button id="setTabNotify" class="settab">Уведомления</button>
+    <button id="setTabBybit" class="settab">Bybit API</button>
   </div>
   <div id="setPanProfile" class="setpan">
     <div class="setacct"><div class="setava" id="setAva">A</div><div><div class="setemail" id="setEmail"></div><div class="setsub">Ваша учётная запись</div></div></div>
@@ -302,6 +361,16 @@
     <label class="setlab" for="setTgProxy">Прокси для Telegram API<span class="sethint" id="setTgProxyState">необязательно</span></label>
     <div class="setpass"><input id="setTgProxy" placeholder="socks5://user:pass@host:1080" autocomplete="off"><button type="button" class="seteye setclr" data-clr="#setTgProxy" title="Очистить прокси">✕</button></div>
     <div class="setbtns"><button id="setTgGo" class="btnpri">Сохранить</button><button id="setTgTest" class="btnsec">Проверить</button></div>
+  </div>
+  <div id="setPanBybit" class="setpan hidden">
+    <div class="setnote">Ключи используются <b>только для чтения</b> баланса и позиций Bybit (торговые ордера с сервера никогда не отправляются). Ключи шифруются libsodium secretbox перед сохранением в БД.</div>
+    <label class="setlab" for="setBybitKey">API Key <span class="sethint" id="setBybitKeyState"></span></label>
+    <div class="setpass"><input id="setBybitKey" placeholder="Bybit API Key" autocomplete="off"><button type="button" class="seteye setclr" data-clr="#setBybitKey" title="Очистить">✕</button></div>
+    <label class="setlab" for="setBybitSec">API Secret <span class="sethint" id="setBybitSecState"></span></label>
+    <div class="setpass"><input id="setBybitSec" type="password" placeholder="Bybit API Secret" autocomplete="new-password"><button class="seteye" data-for="#setBybitSec" type="button" title="Показать/скрыть">👁</button></div>
+    <label class="chk"><input type="checkbox" id="setBybitTestnet"> Testnet (api-testnet.bybit.com)</label>
+    <div class="setbtns"><button id="setBybitSave" class="btnpri" type="button">Сохранить</button><button id="setBybitTest" class="btnsec" type="button">Проверить портфель</button><button id="setBybitDel" class="btnsec" type="button">Удалить</button></div>
+    <div id="setBybitResult" class="setnote hidden"></div>
   </div>
   <div id="setMsg"></div>
 </div></div>
@@ -390,6 +459,7 @@
 <script src="/assets/code_editor.js"></script>
 <script src="/assets/tv_ux.js"></script>
 <script src="/assets/market_panels.js"></script>
+<script src="/assets/replay_paper.js"></script>
 <script src="/assets/terminal.js"></script>
 </body>
 </html>

@@ -171,24 +171,39 @@
   // ---------- settings dialog (profile + notifications with masked secrets) ----------
   function wireSettings() {
     const dlg = $('#setDlg'), msg = $('#setMsg');
-    let tokEdited = false, proxyEdited = false;
+    let tokEdited = false, proxyEdited = false, bkEdited = false, bsEdited = false;
     const say = (s, ok) => { msg.textContent = s; msg.className = s ? (ok ? 'ok' : 'err') : ''; };
     const tab = (id) => {
       $('#setTabProfile').classList.toggle('on', id === 'profile');
       $('#setTabNotify').classList.toggle('on', id === 'notify');
+      $('#setTabBybit').classList.toggle('on', id === 'bybit');
       $('#setPanProfile').classList.toggle('hidden', id !== 'profile');
       $('#setPanNotify').classList.toggle('hidden', id !== 'notify');
+      $('#setPanBybit').classList.toggle('hidden', id !== 'bybit');
       say('');
+    };
+    const showBybitState = (j) => {
+      $('#setBybitKey').value = '';
+      $('#setBybitKey').placeholder = j.configured ? `Сохранён (${j.api_key_mask})` : 'Bybit API Key';
+      $('#setBybitKeyState').textContent = j.configured ? 'зашифрован' : '';
+      $('#setBybitSec').value = '';
+      $('#setBybitSec').placeholder = j.configured ? `Сохранён (${j.api_secret_mask})` : 'Bybit API Secret';
+      $('#setBybitSecState').textContent = j.configured ? 'зашифрован' : '';
+      $('#setBybitTestnet').checked = !!j.testnet;
     };
     $('#setTabProfile').onclick = () => tab('profile');
     $('#setTabNotify').onclick = () => tab('notify');
+    $('#setTabBybit').onclick = () => tab('bybit');
     $('#setTgToken').oninput = () => { tokEdited = true; $('#setTgTokState').textContent = ''; };
     $('#setTgProxy').oninput = () => { proxyEdited = true; $('#setTgProxyState').textContent = 'необязательно'; };
+    $('#setBybitKey').oninput = () => { bkEdited = true; $('#setBybitKeyState').textContent = ''; };
+    $('#setBybitSec').oninput = () => { bsEdited = true; $('#setBybitSecState').textContent = ''; };
     document.querySelectorAll('#setDlg .setclr').forEach((b) => {
       b.onclick = () => {
         const inp = $(b.dataset.clr);
         inp.value = '';
         if (b.dataset.clr === '#setTgToken') { tokEdited = true; $('#setTgTokState').textContent = 'будет очищен'; inp.placeholder = '123456:ABC-DEF...'; }
+        else if (b.dataset.clr === '#setBybitKey') { bkEdited = true; $('#setBybitKeyState').textContent = 'будет очищен'; inp.placeholder = 'Bybit API Key'; }
         else { proxyEdited = true; $('#setTgProxyState').textContent = 'будет очищен'; inp.placeholder = 'socks5://user:pass@host:1080'; }
         inp.focus();
       };
@@ -198,7 +213,8 @@
       const email = $('#userEmail').textContent;
       $('#setEmail').textContent = email;
       $('#setAva').textContent = (email[0] || '?').toUpperCase();
-      tokEdited = false; proxyEdited = false;
+      tokEdited = false; proxyEdited = false; bkEdited = false; bsEdited = false;
+      $('#setBybitResult').classList.add('hidden');
       try {
         const j = await call('GET', 'notify');
         $('#setTgToken').value = '';
@@ -209,6 +225,36 @@
         $('#setTgProxy').placeholder = j.tg_proxy_set ? `Сохранён (${j.tg_proxy_mask})` : 'socks5://user:pass@host:1080';
         $('#setTgProxyState').textContent = j.tg_proxy_set ? 'зашифрован' : 'необязательно';
       } catch { /* leave empty */ }
+      try { showBybitState(await call('GET', 'exchange/bybit')); } catch { /* ignore */ }
+    };
+    $('#setBybitSave').onclick = async () => {
+      try {
+        const r = await call('PUT', 'exchange/bybit', null, {
+          api_key: bkEdited ? $('#setBybitKey').value.trim() : '__KEEP__',
+          api_secret: bsEdited ? $('#setBybitSec').value.trim() : '__KEEP__',
+          testnet: $('#setBybitTestnet').checked,
+        });
+        bkEdited = false; bsEdited = false; showBybitState(r); say('Ключи Bybit сохранены (read-only)', true);
+      } catch (e) { say(e.message); }
+    };
+    $('#setBybitTest').onclick = async () => {
+      const resEl = $('#setBybitResult');
+      say('Запрос к Bybit…');
+      try {
+        const p = await call('GET', 'exchange/bybit/portfolio');
+        resEl.classList.remove('hidden');
+        resEl.innerHTML = `<b>${p.testnet ? 'Testnet' : 'Mainnet'} OK</b> · Total Equity: <b>$${(+p.totalEquity).toFixed(2)}</b> · Available: $${(+p.totalAvailable).toFixed(2)} · Монет: ${p.coins.length}, Позиций: ${p.positions.length}`;
+        say('Подключение успешно', true);
+      } catch (e) { resEl.classList.add('hidden'); say(e.message); }
+    };
+    $('#setBybitDel').onclick = async () => {
+      try {
+        await call('DELETE', 'exchange/bybit');
+        bkEdited = false; bsEdited = false;
+        showBybitState({ configured: false, testnet: false });
+        $('#setBybitResult').classList.add('hidden');
+        say('Ключи удалены', true);
+      } catch (e) { say(e.message); }
     };
     $('#setClose').onclick = () => dlg.classList.add('hidden');
     dlg.onmousedown = (e) => { if (e.target === dlg) dlg.classList.add('hidden'); };
@@ -272,6 +318,7 @@
       if (!['price_above', 'price_below', 'price_cross', 'channel_enter', 'channel_exit'].includes(a.condition_type)) continue;
       sv.push({ id: -1000 - a.id, type: 'alertline', pts: [{ t, p: a.target_price }], style: { text: a.name || '', color: '#ffb300' } });
     }
+    if (window.PMTTrade) sv.push(...PMTTrade.getPositionOverlays(p.cfg.category, p.cfg.symbol, t));
     p.dw.setService(sv);
   }
   async function loadLevels(p) {
@@ -477,7 +524,7 @@
       this.cfg = cfg;
       if (!cfg.indicators) cfg.indicators = [];
       if (!cfg.compares) cfg.compares = [];
-      this.ind = []; this.cmpSeries = []; this.subPovs = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
+      this.ind = []; this.cmpSeries = []; this.subPovs = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null; this.replay = null;
       this.indHidden = false; this.legCollapsed = false; this.lastCrossTime = null;
       this.el = document.createElement('div'); this.el.className = 'pane';
       this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div><div class="cnt hidden"></div>';
@@ -508,6 +555,7 @@
       this.onReopen = () => this.refreshLatest();
       this.onMsg = (m) => this.live(m);
       this.chart.subscribeCrosshairMove((p) => { this.cross(p); syncCrosshairFrom(this, p); });
+      this.chart.subscribeClick((p) => { if (window.PMTTrade && PMTTrade.isPickingReplay() && p && p.time) PMTTrade.pickReplayBar(this, p.time); });
       this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
         if (r && r.from < 15) this.loadOlder();
         if (this.cfg.indicators.some((x) => x.type === 'vprofile' && x.visible !== false && (x.params.mode || 'visible') === 'visible')) {
@@ -681,6 +729,7 @@
       this.cross(null);
     }
     async load() {
+      this.replay = null;
       this.unsubscribe(); this.dw.setKey(this.cfg.category + ':' + this.cfg.symbol); this.candles = []; this.exhausted = false; this.loadEl.textContent = 'загрузка…';
       loadLevels(this);
       const token = this.token = (this.token || 0) + 1;
@@ -698,6 +747,7 @@
     }
     unsubscribe() { if (this.topic) { hub.unsub(this.subCat, this.topic, this.onMsg, this.onReopen); this.topic = null; } }
     live(m) {
+      if (this.replay) return;
       for (const k of m.data || []) {
         const c = { time: Math.floor(k.start / 1000), open: +k.open, high: +k.high, low: +k.low, close: +k.close, volume: +k.volume };
         const last = this.candles[this.candles.length - 1];
@@ -707,9 +757,40 @@
         this.vol.update(this.volData([c])[0]);
         this.scheduleInd(!last || c.time !== last.time);
         if (!this.lastCrossTime) this.cross(null);
+        if (window.PMTTrade) PMTTrade.onBarTick(this.cfg.category, this.cfg.symbol, c, false);
       }
     }
+    enterReplay(idx) {
+      const all = this.replay ? this.replay.all : this.candles.slice();
+      if (!all.length) return;
+      const cut = Math.max(1, Math.min(all.length - 1, idx));
+      this.replay = { all, idx: cut };
+      this.candles = all.slice(0, cut + 1);
+      this.render();
+      this.chart.timeScale().scrollToRealTime();
+    }
+    stepReplay() {
+      if (!this.replay || this.replay.idx + 1 >= this.replay.all.length) return false;
+      this.replay.idx++;
+      const c = this.replay.all[this.replay.idx];
+      this.candles.push(c);
+      const s = this.series(this.candles);
+      this.main.update(s[s.length - 1]);
+      this.vol.update(this.volData([c])[0]);
+      this.scheduleInd(true);
+      this.cross(null);
+      if (window.PMTTrade) PMTTrade.onBarTick(this.cfg.category, this.cfg.symbol, c, true);
+      return this.replay.idx + 1 < this.replay.all.length;
+    }
+    exitReplay() {
+      if (!this.replay) return;
+      this.candles = this.replay.all;
+      this.replay = null;
+      this.render();
+      this.refreshLatest();
+    }
     async refreshLatest() {
+      if (this.replay) return;
       try {
         const d = await api('candles', { category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, limit: 200 });
         if (!d.length) return;
@@ -718,7 +799,7 @@
       } catch { /* next reconnect */ }
     }
     async loadOlder() {
-      if (this.loading || this.exhausted || !this.candles.length || this.candles.length >= MAX_CANDLES) return;
+      if (this.replay || this.loading || this.exhausted || !this.candles.length || this.candles.length >= MAX_CANDLES) return;
       this.loading = true; this.loadEl.textContent = 'история…';
       const token = this.token;
       try {
@@ -1181,6 +1262,7 @@
       }
     }
     if (panes[active] && panes[active].cfg.symbol === sym) updateInfo();
+    if (window.PMTTrade && d.lastPrice !== undefined && panes[active]) PMTTrade.onLiveTick(panes[active].cfg.category, sym, t.last);
   }
   function syncWatchWs() {
     if (!panes[active]) return;
@@ -1581,10 +1663,11 @@ if showLabels and ta.crossunder(close, ma)
   function openDock(tab = 'editor') {
     const dock = $('#bottomDock');
     dock.classList.remove('hidden');
-    document.querySelectorAll('.dock-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.dt === tab));
+    document.querySelectorAll('#dockHead .dock-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.dt === tab));
     $('#dockPanEditor').classList.toggle('hidden', tab !== 'editor');
     $('#dockPanConsole').classList.toggle('hidden', tab !== 'console');
     $('#dockPanTester').classList.toggle('hidden', tab !== 'tester');
+    $('#dockPanPaper').classList.toggle('hidden', tab !== 'paper');
     resizeCharts();
   }
   async function mqlRefresh(selectId) {
@@ -1626,7 +1709,7 @@ if showLabels and ta.crossunder(close, ma)
     };
     $('#dockClose').onclick = () => { dock.classList.add('hidden'); resizeCharts(); };
     $('#dockMax').onclick = () => { dock.classList.toggle('max'); resizeCharts(); };
-    document.querySelectorAll('.dock-tabs button').forEach((b) => { b.onclick = () => openDock(b.dataset.dt); });
+    document.querySelectorAll('#dockHead .dock-tabs button').forEach((b) => { b.onclick = () => openDock(b.dataset.dt); });
     $('#dockOpenTester').onclick = () => $('#btnTest').click();
     $('#conClear').onclick = () => { conLogs = []; $('#conCnt').textContent = '0'; $('#conList').innerHTML = ''; };
     $('#conList').onclick = (e) => {
@@ -2045,6 +2128,19 @@ if showLabels and ta.crossunder(close, ma)
       },
     });
     wireIndicators(); wireTools(); wireMql(); wireTester(); wireSettings(); wireAlerts();
+    PMTTrade.wireReplay({
+      getPane: () => panes[active],
+      toast: (msg, kind) => PMTUx.toast(msg, kind),
+    });
+    PMTTrade.wirePaper({
+      call,
+      getPane: () => panes[active],
+      getTicker: (sym) => tickers[sym],
+      openDock,
+      toast: (msg, kind) => PMTUx.toast(msg, kind),
+      refreshOverlays: () => panes.forEach((p) => applyServiceObjects(p)),
+      openBybitSettings: async () => { await $('#btnSettings').click(); $('#setTabBybit').click(); },
+    });
 
     $('#tfButtons').innerHTML = TFS.map(([v, l]) => `<button data-tf="${v}">${l}</button>`).join('');
     $('#tfButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ tf: b.dataset.tf }); };

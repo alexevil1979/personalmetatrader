@@ -9,10 +9,12 @@ if (PHP_SAPI !== 'cli') {
 $root = dirname(__DIR__, 2);
 require $root . '/src/bootstrap.php';
 
+use PMT\Bybit\Client;
 use PMT\Bybit\Market;
 use PMT\Core\Alerts;
 use PMT\Core\Crypto;
 use PMT\Core\Env;
+use PMT\Core\Paper;
 use PMT\Core\Tg;
 
 function assertSameVal(mixed $expected, mixed $actual, string $label): void
@@ -104,5 +106,17 @@ assertThrows(static fn() => Alerts::validateWebhook('http://localhost/hook'), 'a
 assertThrows(static fn() => Alerts::validateWebhook('ftp://8.8.8.8/hook'), 'alerts block ftp');
 assertSameVal('BTCUSDT: 95000 (Breakout)', Alerts::formatMessage('{{ticker}}: {{price}} ({{name}})', ['symbol' => 'BTCUSDT', 'price' => '95000', 'name' => 'Breakout']), 'alerts formatMessage');
 echo "OK Alerts validation\n";
+
+// 6. Paper trading PnL calculation unit tests
+$pLong = Paper::calcPnl('long', 100.0, 110.0, 2.0, 0.1);
+assertSameVal(true, abs($pLong['gross'] - 20.0) < 1e-9 && abs($pLong['commission'] - 0.22) < 1e-9 && abs($pLong['net'] - 19.78) < 1e-9, 'paper long profit');
+$pShort = Paper::calcPnl('short', 200.0, 180.0, 1.5, 0.055);
+assertSameVal(true, abs($pShort['gross'] - 30.0) < 1e-9 && abs($pShort['net'] - (30.0 - 0.1485)) < 1e-9, 'paper short profit');
+echo "OK Paper::calcPnl\n";
+
+// 7. Bybit HMAC-SHA256 signature determinism
+$sig = Client::buildSign('1700000000000', 'mykey', '5000', 'accountType=UNIFIED', 'mysecret');
+assertSameVal(hash_hmac('sha256', '1700000000000mykey5000accountType=UNIFIED', 'mysecret'), $sig, 'bybit buildSign');
+echo "OK Bybit::buildSign\n";
 
 echo "ALL PHP SMOKE TESTS PASSED\n";

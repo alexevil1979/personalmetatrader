@@ -315,3 +315,23 @@ body.nolegend .pane .ohlc{display:none}
 .mc{border:1px solid var(--line);border-radius:4px;padding:5px 8px;display:flex;flex-direction:column}.mc span{color:var(--mut);font-size:11px}.mc b{font-size:14px}
 #tChart{height:240px;min-height:240px;border:1px solid var(--line)}
 #tTrades table{width:100%;border-collapse:collapse}#tTrades th,#tTrades td{padding:3px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}#tTrades th{color:var(--mut);position:sticky;top:0;background:var(--panel)}
+#replayBar{display:flex;align-items:center;gap:6px;padding:4px 10px;background:color-mix(in srgb,var(--panel) 94%,var(--acc));border-bottom:1px solid var(--line);font-size:11px}
+.rp-badge{font-weight:700;color:var(--acc);letter-spacing:.3px}
+.pp-top{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding-bottom:4px;margin-bottom:6px;flex-wrap:wrap}
+.pp-sum{display:flex;align-items:center;gap:14px;font-size:12px;flex-wrap:wrap}
+.pp-sum span{color:var(--mut)}.pp-sum b{color:var(--txt)}
+.pp-body{display:flex;gap:10px;flex:1;min-height:0}
+.pp-ticket{width:265px;flex:none;display:flex;flex-direction:column;gap:6px;padding-right:10px;border-right:1px solid var(--line);overflow:auto}
+.pp-sides{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.pp-buy,.pp-sell{padding:6px 4px;font-weight:700}
+.pp-buy.on{background:#26a69a;border-color:#26a69a;color:#fff}
+.pp-sell.on{background:#ef5350;border-color:#ef5350;color:#fff}
+.pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.pp-grid label{display:flex;flex-direction:column;gap:2px;color:var(--mut);font-size:11px}
+.pp-grid input,.pp-grid select{width:100%;padding:4px 6px}
+.pp-tables{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto}
+.pp-tab{flex:1;overflow:auto}
+.pp-tbl{width:100%;border-collapse:collapse}
+.pp-tbl th,.pp-tbl td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;font-size:11px}
+.pp-tbl th:first-child,.pp-tbl td:first-child{text-align:left}
+.pp-tbl th{position:sticky;top:0;background:var(--panel);color:var(--mut)}
