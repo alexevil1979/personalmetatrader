@@ -92,7 +92,7 @@
 
   class Drawings {
     constructor(pane, hooks) {
-      this.pane = pane; this.hooks = hooks; this.key = null; this.sel = null; this.creating = null; this.hover = null; this.drag = null; this.series = null; this.service = [];
+      this.pane = pane; this.hooks = hooks; this.key = null; this.sel = null; this.creating = null; this.hover = null; this.drag = null; this.series = null; this.service = []; this.hidden = false;
       const self = this;
       this.prim = {
         attached(p) { self.reqUpd = p.requestUpdate; }, detached() {}, updateAllViews() {},
@@ -108,7 +108,8 @@
     get objs() { return this.key ? loadKey(this.key) : []; }
     // service objects (alert levels) render and drag like drawings but live in their own storage
     setService(list) { this.service = list || []; if (this.sel !== null && !this.all().find((o) => o.id === this.sel)) this.sel = null; this.request(); }
-    all() { return this.key ? loadKey(this.key).concat(this.service) : this.service.slice(); }
+    setHidden(v) { this.hidden = !!v; if (this.hidden && this.sel !== null && this.sel >= 0) { this.sel = null; this.hooks.onSel(this); } this.request(); }
+    all() { return (this.key && !this.hidden ? loadKey(this.key) : []).concat(this.service); }
     setKey(key) {
       this.key = key; this.sel = null; this.creating = null; this.hooks.onSel(this); this.request();
       if (window.PMTSync) PMTSync.fetchObj(key, (list) => { const a = loadKey(key); a.length = 0; list.filter((o) => !SERVICE.includes(o.type)).forEach((o) => a.push(o)); cache(key); this.request(); }, loadKey(key).slice());

@@ -12,6 +12,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/src/bootstrap.php';
 
 use PMT\Bybit\Market;
+use PMT\Core\Crypto;
 use PMT\Core\Db;
 use PMT\Core\Log;
 
@@ -22,12 +23,14 @@ function tgSend(int $uid, string $text): bool
     $st = Db::pdo()->prepare('SELECT telegram_token, telegram_chat, tg_proxy FROM user_notify WHERE user_id=?');
     $st->execute([$uid]);
     $s = $st->fetch() ?: [];
-    $token = !empty($s['telegram_token']) ? $s['telegram_token'] : \PMT\Core\Env::get('TELEGRAM_BOT_TOKEN', '');
-    $chat = !empty($s['telegram_chat']) ? $s['telegram_chat'] : \PMT\Core\Env::get('TELEGRAM_CHAT_ID', '');
+    $dbTok = Crypto::decrypt($s['telegram_token'] ?? null);
+    $token = $dbTok !== '' ? $dbTok : (string) \PMT\Core\Env::get('TELEGRAM_BOT_TOKEN', '');
+    $chat = !empty($s['telegram_chat']) ? (string) $s['telegram_chat'] : (string) \PMT\Core\Env::get('TELEGRAM_CHAT_ID', '');
     if ($token === '' || $chat === '') {
         return false;
     }
-    $proxy = (string) ($s['tg_proxy'] ?? '') ?: \PMT\Core\Env::get('TELEGRAM_PROXY', '');
+    $dbProxy = Crypto::decrypt($s['tg_proxy'] ?? null);
+    $proxy = $dbProxy !== '' ? $dbProxy : (string) \PMT\Core\Env::get('TELEGRAM_PROXY', '');
     $r = \PMT\Core\Tg::call($token, 'sendMessage', ['chat_id' => $chat, 'text' => $text], $proxy);
     if (!$r['ok']) {
         error_log('[pmt-monitor] tgSend failed: ' . ($r['err'] ?? $r['desc'] ?? 'unknown') . ($proxy !== '' ? ' (proxy in use)' : ''));

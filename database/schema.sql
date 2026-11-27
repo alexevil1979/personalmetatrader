@@ -284,3 +284,7 @@ ALTER TABLE user_notify ADD COLUMN telegram_token VARCHAR(128) NULL;
 
 -- migration: optional proxy for Telegram API (scheme://[user:pass@]host:port)
 ALTER TABLE user_notify ADD COLUMN tg_proxy VARCHAR(255) NULL;
+
+-- migration: widen Telegram credential columns for encrypted payloads
+ALTER TABLE user_notify MODIFY telegram_token VARCHAR(512) NULL;
+ALTER TABLE user_notify MODIFY tg_proxy VARCHAR(512) NULL;

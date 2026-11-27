@@ -27,4 +27,13 @@ final class Env
     {
         return self::$vars[$key] ?? $default;
     }
+
+    public static function set(string $key, ?string $value): void
+    {
+        if ($value === null) {
+            unset(self::$vars[$key]);
+        } else {
+            self::$vars[$key] = $value;
+        }
+    }
 }

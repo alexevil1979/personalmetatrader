@@ -1,22 +1,47 @@
 'use strict';
 (() => {
   const TFS = [['1', 'M1'], ['3', 'M3'], ['5', 'M5'], ['15', 'M15'], ['30', 'M30'], ['60', 'H1'], ['120', 'H2'], ['240', 'H4'], ['D', 'D1'], ['W', 'W1'], ['M', 'MN']];
+  const CHART_TYPES = { candles: 'Свечи', hollow: 'Пустые', bars: 'Бары', line: 'Линия', area: 'Область', baseline: 'Базовая', ha: 'HA' };
+  const LAYOUT_LABELS = { '1': '▢', '2v': '◫', '2h': '⬓', '3': '◧', '4': '⊞', '6': '⊟' };
+  const CMP_COLORS = ['#ff9800', '#e91e63', '#00bcd4', '#9c27b0', '#4caf50'];
   const DEFAULT_WATCH = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'BNBUSDT', 'ADAUSDT', 'LINKUSDT', 'AVAXUSDT', 'TONUSDT'];
   const PAGE = 500, MAX_CANDLES = 20000;
 
   const $ = (s) => document.querySelector(s);
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const store = {
     get(k, d) { try { const v = localStorage.getItem('pmt.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem('pmt.' + k, JSON.stringify(v)); } catch { /* ignore */ } if (window.PMTSync) PMTSync.out(k, v); },
     setLocal(k, v) { try { localStorage.setItem('pmt.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
   };
 
-  const state = Object.assign({ category: 'linear', theme: 'dark', tz: 'UTC', layout: 1, sync: false, watch: {}, showWatch: true, showInfo: true, showLegend: true, panes: [] }, {});
+  const state = {
+    category: 'linear', theme: 'dark', tz: 'UTC', layout: '1',
+    syncOpts: { symbol: false, tf: false, crosshair: false, range: false },
+    splits: {}, layoutName: '',
+    watch: {}, showWatch: true, showInfo: true, showLegend: true, panes: [],
+  };
+  const normLayout = (v) => (v === 2 || v === '2' ? '2v' : LAYOUT_LABELS[String(v)] ? String(v) : '1');
+  function applyStatePatch(src) {
+    if (!src || typeof src !== 'object') return;
+    Object.assign(state, src);
+    state.layout = normLayout(state.layout);
+    if (!state.syncOpts || typeof state.syncOpts !== 'object') {
+      const s = !!state.sync;
+      state.syncOpts = { symbol: s, tf: s, crosshair: false, range: false };
+    }
+    delete state.sync;
+    if (!state.splits || typeof state.splits !== 'object') state.splits = {};
+    if (!state.watch || typeof state.watch !== 'object') state.watch = {};
+    if (!Array.isArray(state.panes)) state.panes = [];
+  }
   const save = () => store.set('state', { ...state, panes: panes.map((p) => p.cfg) });
 
   let symbolsByCat = {};
   let panes = [];
   let active = 0;
+  let rulerMode = false;
+  let syncingCross = false, syncingRange = false;
 
   let csrf = '', authed = false;
   async function call(method, path, params, body, retried) {
@@ -24,8 +49,6 @@
     if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
     const r = await fetch('/api/' + path + (params ? '?' + new URLSearchParams(params) : ''), opt);
     const j = await r.json().catch(() => ({}));
-    // the session may be re-created server-side (remember-me) or the csrf rotated by a login in another tab:
-    // silently refresh and retry once instead of showing the login dialog
     if ((r.status === 401 && !path.startsWith('auth/')) || (r.status === 403 && j.error === 'csrf')) {
       if (!retried && !path.startsWith('auth/')) {
         try {
@@ -47,7 +70,13 @@
     for (const k of Object.keys(pend)) {
       const v = pend[k]; delete pend[k];
       try {
-        if (k === 'state') { await call('PUT', 'state', null, v); for (const cat of Object.keys(v.watch || {})) { const j = JSON.stringify(v.watch[cat]); if (lastWL[cat] !== j) { await call('PUT', 'watchlist', { category: cat }, { symbols: v.watch[cat] }); lastWL[cat] = j; } } }
+        if (k === 'state') {
+          await call('PUT', 'state', null, v);
+          for (const cat of Object.keys(v.watch || {})) {
+            const j = JSON.stringify(v.watch[cat]);
+            if (lastWL[cat] !== j) { await call('PUT', 'watchlist', { category: cat }, { symbols: v.watch[cat] }); lastWL[cat] = j; }
+          }
+        }
         else if (k === 'tpl') await call('PUT', 'templates', null, v);
         else { const [cat, sym] = k.slice(4).split(':'); await call('PUT', 'objects', { category: cat, symbol: sym }, { objects: v }); }
       } catch (e) { if (!(k in pend)) pend[k] = v; }
@@ -60,11 +89,19 @@
       if (!authed) return;
       try {
         const [cat, sym] = key.split(':'), j = await call('GET', 'objects', { category: cat, symbol: sym });
-        if (j.objects.length || !local.length) apply(j.objects); else queue('obj:' + key, local); // migrate local objects once
-      } catch { /* offline: keep local cache */ }
+        if (j.objects.length || !local.length) apply(j.objects); else queue('obj:' + key, local);
+      } catch { /* offline */ }
     },
   };
-  window.addEventListener('beforeunload', () => { for (const k of Object.keys(pend)) { /* best effort flush */ try { const v = pend[k]; const [cat, sym] = k.startsWith('obj:') ? k.slice(4).split(':') : []; const url = k === 'state' ? '/api/state' : k === 'tpl' ? '/api/templates' : `/api/objects?category=${cat}&symbol=${sym}`; fetch(url, { method: 'PUT', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(k.startsWith('obj:') ? { objects: v } : v) }); } catch { /* ignore */ } } });
+  window.addEventListener('beforeunload', () => {
+    for (const k of Object.keys(pend)) {
+      try {
+        const v = pend[k], [cat, sym] = k.startsWith('obj:') ? k.slice(4).split(':') : [];
+        const url = k === 'state' ? '/api/state' : k === 'tpl' ? '/api/templates' : `/api/objects?category=${cat}&symbol=${sym}`;
+        fetch(url, { method: 'PUT', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(k.startsWith('obj:') ? { objects: v } : v) });
+      } catch { /* ignore */ }
+    }
+  });
 
   // ---------- auth UI ----------
   let authMode = 'login', resetToken = null;
@@ -91,7 +128,7 @@
   }
   async function logout() {
     try { await call('POST', 'auth/logout'); } catch { /* ignore */ }
-    Object.keys(localStorage).filter((k) => k.startsWith('pmt.')).forEach((k) => localStorage.removeItem(k)); // no data leaks to the next user
+    Object.keys(localStorage).filter((k) => k.startsWith('pmt.')).forEach((k) => localStorage.removeItem(k));
     location.reload();
   }
   let started = false;
@@ -99,12 +136,14 @@
     authed = true; $('#authDlg').classList.add('hidden'); $('#userEmail').textContent = user.email; $('#userBox').classList.remove('hidden');
     if (started) return; started = true;
     const st = (await call('GET', 'state')).state;
-    Object.assign(state, st || store.get('state', {}));
-    try { // templates: server wins, local is migrated once
+    applyStatePatch(st || store.get('state', {}));
+    try {
       const t = (await call('GET', 'templates')).templates;
       if (Object.keys(t).length) store.setLocal('tpl', t); else if (Object.keys(store.get('tpl', {})).length) queue('tpl', store.get('tpl', {}));
     } catch { /* keep local */ }
-    for (const cat of ['linear', 'spot', 'inverse']) { try { const w = (await call('GET', 'watchlist', { category: cat })).symbols; if (w && w.length) { state.watch[cat] = w; lastWL[cat] = JSON.stringify(w); } } catch { /* keep local */ } }
+    for (const cat of ['linear', 'spot', 'inverse']) {
+      try { const w = (await call('GET', 'watchlist', { category: cat })).symbols; if (w && w.length) { state.watch[cat] = w; lastWL[cat] = JSON.stringify(w); } } catch { /* keep local */ }
+    }
     init();
   }
   async function boot() {
@@ -126,9 +165,10 @@
   }
   const symInfo = (cat, sym) => (symbolsByCat[cat] || []).find((s) => s.symbol === sym);
 
-  // ---------- settings dialog (profile + notifications) ----------
+  // ---------- settings dialog (profile + notifications with masked secrets) ----------
   function wireSettings() {
     const dlg = $('#setDlg'), msg = $('#setMsg');
+    let tokEdited = false, proxyEdited = false;
     const say = (s, ok) => { msg.textContent = s; msg.className = s ? (ok ? 'ok' : 'err') : ''; };
     const tab = (id) => {
       $('#setTabProfile').classList.toggle('on', id === 'profile');
@@ -139,17 +179,37 @@
     };
     $('#setTabProfile').onclick = () => tab('profile');
     $('#setTabNotify').onclick = () => tab('notify');
+    $('#setTgToken').oninput = () => { tokEdited = true; $('#setTgTokState').textContent = ''; };
+    $('#setTgProxy').oninput = () => { proxyEdited = true; $('#setTgProxyState').textContent = 'необязательно'; };
+    document.querySelectorAll('#setDlg .setclr').forEach((b) => {
+      b.onclick = () => {
+        const inp = $(b.dataset.clr);
+        inp.value = '';
+        if (b.dataset.clr === '#setTgToken') { tokEdited = true; $('#setTgTokState').textContent = 'будет очищен'; inp.placeholder = '123456:ABC-DEF...'; }
+        else { proxyEdited = true; $('#setTgProxyState').textContent = 'будет очищен'; inp.placeholder = 'socks5://user:pass@host:1080'; }
+        inp.focus();
+      };
+    });
     $('#btnSettings').onclick = async () => {
       dlg.classList.remove('hidden'); tab('profile');
       const email = $('#userEmail').textContent;
       $('#setEmail').textContent = email;
       $('#setAva').textContent = (email[0] || '?').toUpperCase();
-      try { const j = await call('GET', 'notify'); $('#setTgToken').value = j.telegram_token || ''; $('#setTgChat').value = j.telegram_chat || ''; $('#setTgProxy').value = j.tg_proxy || ''; } catch { /* leave empty */ }
+      tokEdited = false; proxyEdited = false;
+      try {
+        const j = await call('GET', 'notify');
+        $('#setTgToken').value = '';
+        $('#setTgToken').placeholder = j.telegram_token_set ? `Сохранён (${j.telegram_token_mask})` : '123456:ABC-DEF...';
+        $('#setTgTokState').textContent = j.telegram_token_set ? 'зашифрован' : '';
+        $('#setTgChat').value = j.telegram_chat || '';
+        $('#setTgProxy').value = '';
+        $('#setTgProxy').placeholder = j.tg_proxy_set ? `Сохранён (${j.tg_proxy_mask})` : 'socks5://user:pass@host:1080';
+        $('#setTgProxyState').textContent = j.tg_proxy_set ? 'зашифрован' : 'необязательно';
+      } catch { /* leave empty */ }
     };
     $('#setClose').onclick = () => dlg.classList.add('hidden');
     dlg.onmousedown = (e) => { if (e.target === dlg) dlg.classList.add('hidden'); };
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !dlg.classList.contains('hidden')) { e.stopPropagation(); dlg.classList.add('hidden'); } });
-    document.querySelectorAll('#setDlg .seteye').forEach((b) => {
+    document.querySelectorAll('#setDlg .seteye[data-for]').forEach((b) => {
       b.onclick = () => { const i = $(b.dataset.for); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; b.textContent = show ? '🙈' : '👁'; };
     });
     $('#setPassGo').onclick = async () => {
@@ -158,23 +218,37 @@
       if (p1.length < 10) { say('Пароль: от 10 символов'); return; }
       try { await call('POST', 'auth/password', null, { password: p1 }); $('#setPass1').value = $('#setPass2').value = ''; say('Пароль изменён', true); } catch (e) { say(e.message); }
     };
+    const notifyPayload = () => ({
+      telegram_token: tokEdited ? $('#setTgToken').value.trim() : '__KEEP__',
+      telegram_chat: $('#setTgChat').value.trim(),
+      tg_proxy: proxyEdited ? $('#setTgProxy').value.trim() : '__KEEP__',
+    });
     $('#setTgGo').onclick = async () => {
-      try { await call('PUT', 'notify', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim(), tg_proxy: $('#setTgProxy').value.trim() }); say('Сохранено', true); } catch (e) { say(e.message); }
+      try {
+        await call('PUT', 'notify', null, notifyPayload());
+        say('Сохранено', true);
+        tokEdited = false; proxyEdited = false;
+        const j = await call('GET', 'notify');
+        $('#setTgToken').value = ''; $('#setTgToken').placeholder = j.telegram_token_set ? `Сохранён (${j.telegram_token_mask})` : '123456:ABC-DEF...';
+        $('#setTgTokState').textContent = j.telegram_token_set ? 'зашифрован' : '';
+        $('#setTgProxy').value = ''; $('#setTgProxy').placeholder = j.tg_proxy_set ? `Сохранён (${j.tg_proxy_mask})` : 'socks5://user:pass@host:1080';
+        $('#setTgProxyState').textContent = j.tg_proxy_set ? 'зашифрован' : 'необязательно';
+      } catch (e) { say(e.message); }
     };
     $('#setTgTest').onclick = async () => {
       say('Отправляю…');
-      try { await call('POST', 'notify/test', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim(), tg_proxy: $('#setTgProxy').value.trim() }); say('Отправлено — проверьте Telegram', true); } catch (e) { say(e.message); }
+      try { await call('POST', 'notify/test', null, notifyPayload()); say('Отправлено — проверьте Telegram', true); } catch (e) { say(e.message); }
     };
   }
 
-  // ---------- alert levels (server-monitored, Telegram notify on breakout) ----------
+  // ---------- alert levels ----------
   const LVL_UP = -101, LVL_DN = -102;
   async function loadLevels(p) {
     const cat = p.cfg.category, sym = p.cfg.symbol;
     try {
       const j = await call('GET', 'levels', { category: cat, symbol: sym });
       if (!panes.includes(p) || p.cfg.category !== cat || p.cfg.symbol !== sym) return;
-      if (j && j.levels !== undefined) applyLevels(p, j.levels); // garbage/failed response: keep current lines
+      if (j && j.levels !== undefined) applyLevels(p, j.levels);
     } catch { /* offline */ }
   }
   function applyLevels(p, lv) {
@@ -188,8 +262,17 @@
     const up = p.dw.service.find((x) => x.id === LVL_UP), lo = p.dw.service.find((x) => x.id === LVL_DN);
     return call('PUT', 'levels', { category: p.cfg.category, symbol: p.cfg.symbol }, { upper: up ? up.pts[0].p : null, lower: lo ? lo.pts[0].p : null }).catch(() => {});
   }
+  async function setLevelAtPrice(p, price) {
+    const last = p.candles.length ? p.candles[p.candles.length - 1].close : price;
+    const up = p.dw.service.find((x) => x.id === LVL_UP), lo = p.dw.service.find((x) => x.id === LVL_DN);
+    const upper = price >= last ? price : (up ? up.pts[0].p : null);
+    const lower = price < last ? price : (lo ? lo.pts[0].p : null);
+    await call('PUT', 'levels', { category: p.cfg.category, symbol: p.cfg.symbol }, { upper, lower }).catch(() => {});
+    applyLevels(p, { upper, lower });
+    PMTUx.toast(`Алерт установлен на ${price.toFixed(p.precision())}`, 'ok');
+  }
 
-  // ---------- WebSocket hub: one shared connection per category ----------
+  // ---------- WebSocket hub ----------
   class WsHub {
     constructor() { this.conns = {}; }
     sub(cat, topic, cb, onReopen) {
@@ -214,7 +297,7 @@
         const args = [...c.topics.keys()];
         for (let i = 0; i < args.length; i += 10) ws.send(JSON.stringify({ op: 'subscribe', args: args.slice(i, i + 10) }));
         c.ping = setInterval(() => ws.readyState === 1 && ws.send('{"op":"ping"}'), 20000);
-        if (!first || c.hadOpen) c.reopen.forEach((f) => f()); // gap fill after reconnect
+        if (!first || c.hadOpen) c.reopen.forEach((f) => f());
         c.hadOpen = true;
       };
       ws.onmessage = (e) => {
@@ -250,33 +333,88 @@
     ? { bg: '#0e1117', txt: '#d1d4dc', grid: '#1b2230', up: '#26a69a', dn: '#ef5350' }
     : { bg: '#ffffff', txt: '#1b1f2a', grid: '#eceff4', up: '#16a085', dn: '#d9363e' };
 
+  const chartMenuHooks = {
+    addLevelAt: setLevelAtPrice,
+    goToDate: (p) => PMTUx.openGoToDate(p, state.tz),
+    compare: (p) => openCompareFor(p),
+  };
+
   // ---------- Chart pane ----------
   class Pane {
     constructor(host, cfg) {
-      this.cfg = cfg; if (!cfg.indicators) cfg.indicators = []; this.ind = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
+      this.cfg = cfg;
+      if (!cfg.indicators) cfg.indicators = [];
+      if (!cfg.compares) cfg.compares = [];
+      this.ind = []; this.cmpSeries = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
+      this.indHidden = false; this.legCollapsed = false; this.lastCrossTime = null;
       this.el = document.createElement('div'); this.el.className = 'pane';
       this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div><div class="cnt hidden"></div>';
       host.appendChild(this.el);
       this.cv = this.el.querySelector('.cv'); this.legend = this.el.querySelector('.ohlc'); this.loadEl = this.el.querySelector('.load');
       this.cntEl = this.el.querySelector('.cnt');
       buildTfbar(this);
+      this.wireLegendEvents();
       this.el.addEventListener('contextmenu', (e) => {
         let w = 0; try { w = this.chart.priceScale('right').width(); } catch { /* not ready */ }
         const r = this.cv.getBoundingClientRect();
-        if (e.clientX - r.left < r.width - w - 4) return; // right-clicked the chart, not the price scale
         e.preventDefault();
-        showScaleMenu(this, e.clientX, e.clientY);
+        if (e.clientX - r.left >= r.width - w - 4) showScaleMenu(this, e.clientX, e.clientY);
+        else PMTUx.showChartMenu(this, e.clientX, e.clientY, chartMenuHooks);
       });
       buildTools(this);
-      this.dw = new PMTDraw.Drawings(this, drawHooks); this.pov = new PMTPineView.Overlay(this);
+      this.dw = new PMTDraw.Drawings(this, drawHooks);
+      this.pov = new PMTPineView.Overlay(this);
+      this.ruler = new PMTUx.Ruler(this, { isRuler: () => rulerMode, activate: (p) => setActive(panes.indexOf(p)), doneRuler: () => setRuler(false) });
       this.chart = LightweightCharts.createChart(this.cv, { autoSize: true, crosshair: { mode: 0 }, timeScale: { timeVisible: true, rightOffset: 8 } });
       this.onReopen = () => this.refreshLatest();
       this.onMsg = (m) => this.live(m);
-      this.chart.subscribeCrosshairMove((p) => this.cross(p));
+      this.chart.subscribeCrosshairMove((p) => { this.cross(p); syncCrosshairFrom(this, p); });
       this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => { if (r && r.from < 15) this.loadOlder(); });
+      this.chart.timeScale().subscribeVisibleTimeRangeChange((tr) => syncRangeFrom(this, tr));
       this.el.addEventListener('mousedown', () => setActive(panes.indexOf(this)));
       this.applyTheme(); this.buildSeries();
       this.load();
+    }
+    wireLegendEvents() {
+      this.legend.addEventListener('mousedown', (e) => e.stopPropagation());
+      this.legend.addEventListener('click', (e) => {
+        const i = panes.indexOf(this); if (i >= 0 && i !== active) setActive(i);
+        if (e.target.closest('.leg-sym')) { openSymbolPicker(); return; }
+        if (e.target.closest('.leg-col')) { this.legCollapsed = !this.legCollapsed; this.cross(null); return; }
+        const cdel = e.target.closest('[data-cdel]');
+        if (cdel) {
+          const idx = +cdel.dataset.cdel;
+          this.cfg.compares.splice(idx, 1); save(); this.syncCompares(); this.cross(null); return;
+        }
+        const btn = e.target.closest('[data-la]');
+        if (!btn) return;
+        const uid = btn.dataset.u, act = btn.dataset.la;
+        const inst = this.cfg.indicators.find((x) => x.uid === uid);
+        if (!inst) return;
+        if (act === 'vis') { inst.visible = inst.visible === false; this.changeInd(); save(); }
+        else if (act === 'cfg') { openIndForUid(uid); }
+        else if (act === 'del') { this.cfg.indicators = this.cfg.indicators.filter((x) => x.uid !== uid); this.changeInd(); save(); }
+      });
+    }
+    tfLabel() { const t = TFS.find((x) => x[0] === this.cfg.tf); return t ? t[1] : this.cfg.tf; }
+    resetView() {
+      this.chart.priceScale('right').applyOptions({ autoScale: true, mode: LightweightCharts.PriceScaleMode.Normal });
+      this.chart.timeScale().scrollToRealTime();
+    }
+    async goToTime(ts) {
+      if (!this.candles.length) return;
+      while (ts < this.candles[0].time && !this.exhausted && this.candles.length < MAX_CANDLES) {
+        const prevLen = this.candles.length;
+        await this.loadOlder();
+        if (this.candles.length === prevLen) break;
+      }
+      const c = this.candles; if (!c.length) return;
+      let lo = 0, hi = c.length - 1;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (c[m].time < ts) lo = m + 1; else hi = m; }
+      const off = this.dw.off();
+      const idx = lo + off;
+      this.chart.timeScale().setVisibleLogicalRange({ from: idx - 45, to: idx + 45 });
+      PMTUx.toast('Переход к ' + fmtTime(c[lo].time, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }), 'ok');
     }
     applyTheme() {
       const t = chartTheme();
@@ -291,29 +429,45 @@
       });
       if (this.main) this.buildSeries();
     }
+    clearCompares() {
+      for (const c of this.cmpSeries) { try { this.chart.removeSeries(c.series); } catch { /* gone */ } }
+      this.cmpSeries = [];
+    }
     buildSeries() {
       const t = chartTheme();
       this.mk = null;
-      if (this.main) { this.clearIndicators(); this.chart.removeSeries(this.main); this.chart.removeSeries(this.vol); }
+      if (this.main) {
+        this.clearIndicators();
+        this.clearCompares();
+        this.chart.removeSeries(this.main);
+        this.chart.removeSeries(this.vol);
+      }
       const info = symInfo(this.cfg.category, this.cfg.symbol);
       const pf = info ? { type: 'price', precision: +info.scale, minMove: +info.tick } : { type: 'price', precision: 2, minMove: 0.01 };
       const ty = this.cfg.type;
       const LC = LightweightCharts;
       if (ty === 'line') this.main = this.chart.addSeries(LC.LineSeries, { color: '#2962ff', lineWidth: 2, priceFormat: pf });
+      else if (ty === 'area') this.main = this.chart.addSeries(LC.AreaSeries, { lineColor: '#2962ff', topColor: 'rgba(41,98,255,0.28)', bottomColor: 'rgba(41,98,255,0.02)', lineWidth: 2, priceFormat: pf });
+      else if (ty === 'baseline') {
+        const baseP = this.candles.length ? this.candles[0].close : 0;
+        this.main = this.chart.addSeries(LC.BaselineSeries, { baseValue: { type: 'price', price: baseP }, topLineColor: t.up, topFillColor1: t.up + '44', topFillColor2: t.up + '05', bottomLineColor: t.dn, bottomFillColor1: t.dn + '05', bottomFillColor2: t.dn + '44', lineWidth: 2, priceFormat: pf });
+      }
       else if (ty === 'bars') this.main = this.chart.addSeries(LC.BarSeries, { upColor: t.up, downColor: t.dn, priceFormat: pf });
+      else if (ty === 'hollow') this.main = this.chart.addSeries(LC.CandlestickSeries, { upColor: 'transparent', downColor: t.dn, borderUpColor: t.up, borderDownColor: t.dn, wickUpColor: t.up, wickDownColor: t.dn, priceFormat: pf });
       else this.main = this.chart.addSeries(LC.CandlestickSeries, { upColor: t.up, downColor: t.dn, borderUpColor: t.up, borderDownColor: t.dn, wickUpColor: t.up, wickDownColor: t.dn, priceFormat: pf });
-      this.dw.attach(); this.pov.attach();
+      this.dw.attach(); this.pov.attach(); this.ruler.attach();
       this.vol = this.chart.addSeries(LC.HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' }, 0);
       this.vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       this.render();
+      this.syncCompares();
     }
     series(c) {
-      if (this.cfg.type === 'line') return c.map((k) => ({ time: k.time, value: k.close }));
+      if (this.cfg.type === 'line' || this.cfg.type === 'area' || this.cfg.type === 'baseline') return c.map((k) => ({ time: k.time, value: k.close }));
       if (this.cfg.type === 'ha') return heikin(c);
       return c;
     }
     tfSec() { const t = TFS.find((x) => x[0] === this.cfg.tf); return !t ? 60 : t[0] === 'D' ? 86400 : t[0] === 'W' ? 604800 : t[0] === 'M' ? 2592000 : +t[0] * 60; }
-    tickCountdown() { // remaining bar time as a label on the price scale
+    tickCountdown() {
       const last = this.candles[this.candles.length - 1];
       let y = null;
       if (last && this.main) { try { y = this.main.priceToCoordinate(last.close); } catch { /* not ready */ } }
@@ -325,7 +479,47 @@
       this.cntEl.style.top = Math.round(y) + 'px';
     }
     volData(c) { const t = chartTheme(); return c.map((k) => ({ time: k.time, value: k.volume, color: (k.close >= k.open ? t.up : t.dn) + '66' })); }
-    render() { this.main.setData(this.series(this.candles)); this.vol.setData(this.volData(this.candles)); this.refreshIndicators(true); }
+    render() {
+      if (this.cfg.type === 'baseline' && this.candles.length) {
+        this.main.applyOptions({ baseValue: { type: 'price', price: this.candles[0].close } });
+      }
+      this.main.setData(this.series(this.candles));
+      this.vol.setData(this.volData(this.candles));
+      this.refreshIndicators(true);
+      this.cross(null);
+    }
+    async syncCompares() {
+      this.clearCompares();
+      const cmps = this.cfg.compares || [];
+      if (!cmps.length || !this.candles.length) { this.cross(null); return; }
+      const tok = this.token;
+      const limit = Math.min(1000, Math.max(200, this.candles.length));
+      this.chart.priceScale('cmp').applyOptions({ visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } });
+      for (let idx = 0; idx < cmps.length; idx++) {
+        const cm = cmps[idx];
+        try {
+          const rows = await api('candles', { category: cm.category, symbol: cm.symbol, tf: this.cfg.tf, limit });
+          if (tok !== this.token) return;
+          const byT = new Map(rows.map((r) => [r.time, r.close]));
+          let base = null;
+          const pts = [];
+          for (const k of this.candles) {
+            const v = byT.get(k.time);
+            if (v === undefined) continue;
+            if (base === null) base = v;
+            pts.push({ time: k.time, value: base ? ((v - base) / base) * 100 : 0, raw: v });
+          }
+          const col = cm.color || CMP_COLORS[idx % CMP_COLORS.length];
+          const s = this.chart.addSeries(LightweightCharts.LineSeries, {
+            color: col, lineWidth: 1.5, priceScaleId: 'cmp', lastValueVisible: true, priceLineVisible: false,
+            title: cm.symbol, priceFormat: { type: 'custom', formatter: (v) => (v >= 0 ? '+' : '') + v.toFixed(2) + '%' },
+          });
+          s.setData(pts.map(({ time, value }) => ({ time, value })));
+          this.cmpSeries.push({ ...cm, color: col, series: s, pts });
+        } catch { /* ignore failed compare */ }
+      }
+      this.cross(null);
+    }
     async load() {
       this.unsubscribe(); this.dw.setKey(this.cfg.category + ':' + this.cfg.symbol); this.candles = []; this.exhausted = false; this.loadEl.textContent = 'загрузка…';
       loadLevels(this);
@@ -333,7 +527,7 @@
       try {
         const d = await api('candles', { category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, limit: PAGE });
         if (token !== this.token) return;
-        this.candles = d; this.render(); this.chart.timeScale().scrollToRealTime();
+        this.candles = d; this.render(); this.syncCompares(); this.chart.timeScale().scrollToRealTime();
         this.loadEl.textContent = '';
       } catch (e) { this.loadEl.textContent = 'ошибка: ' + e.message; }
       this.subscribe();
@@ -347,14 +541,15 @@
       for (const k of m.data || []) {
         const c = { time: Math.floor(k.start / 1000), open: +k.open, high: +k.high, low: +k.low, close: +k.close, volume: +k.volume };
         const last = this.candles[this.candles.length - 1];
-        if (last && c.time < last.time) continue;          // stale
-        if (last && c.time === last.time) this.candles[this.candles.length - 1] = c; else this.candles.push(c); // no duplicates
+        if (last && c.time < last.time) continue;
+        if (last && c.time === last.time) this.candles[this.candles.length - 1] = c; else this.candles.push(c);
         const s = this.series(this.candles); this.main.update(s[s.length - 1]);
         this.vol.update(this.volData([c])[0]);
         this.scheduleInd(!last || c.time !== last.time);
+        if (!this.lastCrossTime) this.cross(null);
       }
     }
-    async refreshLatest() { // after WS reconnect: fill any gap, dedupe by time
+    async refreshLatest() {
       try {
         const d = await api('candles', { category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, limit: 200 });
         if (!d.length) return;
@@ -379,12 +574,16 @@
       this.loading = false; this.loadEl.textContent = '';
     }
     cross(p) {
+      this.lastCrossTime = p && p.time ? p.time : null;
       let k = this.candles[this.candles.length - 1];
       if (p && p.time) { const f = this.candles.find((x) => x.time === p.time); if (f) k = f; }
       if (!k) { this.legend.textContent = ''; return; }
-      const d = k.close - k.open, cls = d >= 0 ? 'up' : 'dn';
-      this.legend.innerHTML = `<b>${this.cfg.symbol}</b> ${TFS.find((t) => t[0] === this.cfg.tf)[1]} &nbsp; O ${k.open} H ${k.high} L ${k.low} C <span class="${cls}">${k.close}</span> V ${k.volume.toFixed(2)}`;
-      this.legend.innerHTML += this.indLegend(k.time);
+      const d = k.close - k.open, pct = k.open ? (d / k.open) * 100 : 0, cls = d >= 0 ? 'up' : 'dn', sg = d >= 0 ? '+' : '';
+      const hasInds = this.cfg.indicators.length > 0 || this.cmpSeries.length > 0;
+      const colBtn = hasInds ? `<button class="leg-col" title="Свернуть/развернуть список">${this.legCollapsed ? '▸' : '▾'}</button>` : '';
+      const head = `<div class="leg-head"><button class="leg-sym" title="Сменить символ">${esc(this.cfg.symbol)}</button><span>${this.tfLabel()}</span><span>O ${k.open} H ${k.high} L ${k.low} C <span class="${cls}">${k.close}</span> <span class="${cls}">${sg}${d.toFixed(this.precision())} (${sg}${pct.toFixed(2)}%)</span> V ${k.volume.toFixed(2)}</span>${colBtn}</div>`;
+      const rows = this.indLegend(k.time);
+      this.legend.innerHTML = head + (rows ? `<div class="leg-inds${this.legCollapsed ? ' collapsed' : ''}">${rows}</div>` : '');
     }
     // ---------- indicators ----------
     clearIndicators() {
@@ -392,14 +591,15 @@
       this.ind = []; this.pov.clear(); if (this.mk) this.mk.setMarkers([]);
     }
     scheduleInd(newBar) {
-      if (!this.cfg.indicators.length) return;
+      if (!this.cfg.indicators.length || this.indHidden) return;
       this.cfg.indicators.filter((x) => x.type === 'mql' && x.visible !== false).forEach((x) => this.runMql(x, !newBar));
       if (newBar) { clearTimeout(this.indT); this.indT = null; this.refreshIndicators(false); return; }
       if (this.indT) return;
-      this.indT = setTimeout(() => { this.indT = null; this.refreshIndicators(false); }, 1000); // throttled recompute
+      this.indT = setTimeout(() => { this.indT = null; this.refreshIndicators(false); }, 1000);
     }
     refreshIndicators(full) {
       if (!this.main || !window.PMTInd) return;
+      if (this.indHidden) { this.clearIndicators(); this.cross(null); return; }
       if (full) this.clearIndicators();
       const n = this.candles.length; if (!n) return;
       const step = n > 1 ? this.candles[n - 1].time - this.candles[n - 2].time : 3600;
@@ -440,7 +640,7 @@
       if (full && paneIdx > 0) { try { this.chart.panes()[0].setStretchFactor(3); } catch { /* old api */ } }
     }
 
-    // ---------- MQL scripts (executed server-side in the sandbox) ----------
+    // ---------- MQL scripts ----------
     mqlSt(inst) { return (this.mql = this.mql || {})[inst.uid] || (this.mql[inst.uid] = {}); }
     mqlKey(inst) { const n = this.candles.length; return [this.cfg.category, this.cfg.symbol, this.cfg.tf, inst.scriptId, inst.version || 0, JSON.stringify(inst.params), n ? this.candles[n - 1].time : 0].join('|'); }
     async runMql(inst, force) {
@@ -498,78 +698,257 @@
     }
     indLegend(time) {
       let html = '';
-      for (const inst of this.cfg.indicators.filter((x) => x.type === 'mql' && x.visible !== false)) {
-        const st = this.mqlSt(inst), it = this.ind.find((x) => x.inst === inst);
+      this.cmpSeries.forEach((cm, idx) => {
+        const pt = cm.pts.find((x) => x.time === time) || cm.pts[cm.pts.length - 1];
+        const v = pt ? `${pt.value >= 0 ? '+' : ''}${pt.value.toFixed(2)}%` : '';
+        html += `<div class="leg-row"><span class="leg-name" style="color:${cm.color}">⊕ ${esc(cm.symbol)}</span> <span>${v}</span><span class="leg-acts"><button data-cdel="${idx}" title="Удалить сравнение">✕</button></span></div>`;
+      });
+      for (const inst of this.cfg.indicators) {
+        const vis = inst.visible !== false && !this.indHidden;
+        const acts = `<span class="leg-acts"><button data-la="vis" data-u="${inst.uid}" title="Показать/скрыть">${vis ? '👁' : '🚫'}</button><button data-la="cfg" data-u="${inst.uid}" title="Настройки">⚙</button><button data-la="del" data-u="${inst.uid}" title="Удалить">✕</button></span>`;
+        if (inst.type === 'mql') {
+          const st = this.mqlSt(inst), it = this.ind.find((x) => x.inst === inst);
+          let vals = '';
+          if (vis && it) {
+            const idx = it.res.times.indexOf(time) >= 0 ? it.res.times.indexOf(time) : it.res.times.length - 1;
+            vals = it.res.plots.map((pl) => { const v = pl.values[idx]; return v === null || v === undefined ? '' : `<span style="color:${pl.color}">${Math.abs(v) >= 100 ? v.toFixed(2) : v.toPrecision(5)}</span>`; }).join(' ');
+          }
+          const sub = `${esc(inst.name)}${it && it.res.info.short ? ' · ' + esc(it.res.info.short) : ''}${it && it.res.info.lang === 'pine' ? ' · pine' : ''}`;
+          html += `<div class="leg-row${vis ? '' : ' hid'}"><span class="leg-name">${sub}</span> ${vals}${st.err ? ` <span class="dn">${esc(st.err)}</span>` : (!it && vis) ? ' <span class="leg-name">…</span>' : ''}${acts}</div>`;
+          continue;
+        }
+        const def = PMTInd.REG[inst.type]; if (!def) continue;
+        const it = this.ind.find((x) => x.inst === inst);
         let vals = '';
-        if (it) { const idx = it.res.times.indexOf(time) >= 0 ? it.res.times.indexOf(time) : it.res.times.length - 1; vals = it.res.plots.map((pl) => { const v = pl.values[idx]; return v === null || v === undefined ? '' : `<span style="color:${pl.color}">${Math.abs(v) >= 100 ? v.toFixed(2) : v.toPrecision(5)}</span>`; }).join(' '); }
-        html += `<br><span style="color:var(--mut)">${inst.name}${it && it.res.info.short ? ' · ' + it.res.info.short : ''}${it && it.res.info.lang === 'pine' ? ' · pine' : ''}</span> ${vals}${st.err ? ` <span class="dn">${String(st.err).replace(/</g, '&lt;')}</span>` : !it ? ' <span style="color:var(--mut)">…</span>' : ''}`;
-      }
-      for (const it of this.ind) {
-        if (it.mql) continue;
-        const def = PMTInd.REG[it.inst.type]; if (!it.out) continue;
-        const idx = this.candles.findIndex((x) => x.time === time);
-        const vals = def.outputs.filter((o) => o.type !== 'levels' && o.type !== 'markers' && !o.shift).map((o) => {
-          const v = it.out[o.k][idx >= 0 ? idx : this.candles.length - 1];
-          return v === null || v === undefined ? '' : `<span style="color:${this.col(it.inst, o)}">${Math.abs(v) >= 100 ? v.toFixed(2) : v.toPrecision(5)}</span>`;
-        }).join(' ');
-        html += `<br><span style="color:var(--mut)">${def.name}(${Object.values(it.inst.params).join(',')})</span> ${vals}`;
+        if (vis && it && it.out) {
+          const idx = this.candles.findIndex((x) => x.time === time);
+          vals = def.outputs.filter((o) => o.type !== 'levels' && o.type !== 'markers' && !o.shift).map((o) => {
+            const v = it.out[o.k][idx >= 0 ? idx : this.candles.length - 1];
+            return v === null || v === undefined ? '' : `<span style="color:${this.col(inst, o)}">${Math.abs(v) >= 100 ? v.toFixed(2) : v.toPrecision(5)}</span>`;
+          }).join(' ');
+        }
+        html += `<div class="leg-row${vis ? '' : ' hid'}"><span class="leg-name">${esc(def.name)}(${Object.values(inst.params).join(',')})</span> ${vals}${acts}</div>`;
       }
       return html;
     }
     addInd(type) {
-      const def = PMTInd.REG[type]; this.cfg.indicators.push({ uid: Date.now() + '' + Math.floor(Math.random() * 1000), type, params: PMTInd.defaults(type), style: { colors: {}, width: 1 }, visible: true });
+      this.cfg.indicators.push({ uid: Date.now() + '' + Math.floor(Math.random() * 1000), type, params: PMTInd.defaults(type), style: { colors: {}, width: 1 }, visible: true });
       this.refreshIndicators(true); this.cross(null);
     }
     changeInd() { this.refreshIndicators(true); this.cross(null); }
     set(patch) { Object.assign(this.cfg, patch); }
     precision() { const i = symInfo(this.cfg.category, this.cfg.symbol); return i ? +i.scale : 2; }
-    destroy() { this.dw.destroy(); this.unsubscribe(); this.chart.remove(); const b = this.el.querySelector('#objBar'); if (b) document.body.appendChild(b); this.el.remove(); }
+    destroy() { this.dw.destroy(); this.ruler.destroy(); this.unsubscribe(); this.chart.remove(); const b = this.el.querySelector('#objBar'); if (b) document.body.appendChild(b); this.el.remove(); }
   }
 
-  // ---------- UI wiring ----------
+  // ---------- Granular Sync (Crosshair + Visible Range) ----------
+  function syncCrosshairFrom(src, p) {
+    if (!state.syncOpts.crosshair || syncingCross) return;
+    syncingCross = true;
+    try {
+      for (const o of panes) {
+        if (o === src || !o.main || !o.candles.length) continue;
+        try {
+          if (!p || !p.time) { o.chart.clearCrosshairPosition(); continue; }
+          const c = o.candles;
+          let lo = 0, hi = c.length - 1;
+          while (lo < hi) { const m = (lo + hi + 1) >> 1; if (c[m].time <= p.time) lo = m; else hi = m - 1; }
+          o.chart.setCrosshairPosition(c[lo].close, c[lo].time, o.main);
+        } catch { /* ignore */ }
+      }
+    } finally { syncingCross = false; }
+  }
+  function syncRangeFrom(src, tr) {
+    if (!state.syncOpts.range || syncingRange || !tr) return;
+    syncingRange = true;
+    try {
+      for (const o of panes) {
+        if (o === src || !o.candles.length) continue;
+        try { o.chart.timeScale().setVisibleRange(tr); } catch { /* ignore */ }
+      }
+    } finally { requestAnimationFrame(() => { syncingRange = false; }); }
+  }
+
+  // ---------- UI wiring & Grid ----------
   function setActive(i) {
     if (i < 0 || !panes[i]) return;
     active = i; panes.forEach((p, k) => p.el.classList.toggle('active', k === i));
     const c = panes[i].cfg;
     if ($('#category').value !== c.category) $('#category').value = c.category;
-    $('#symbolInput').value = c.symbol;
+    $('#symBtnTxt').textContent = c.symbol;
     document.querySelectorAll('#tfButtons button').forEach((b) => b.classList.toggle('on', b.dataset.tf === c.tf));
     panes.forEach((x) => syncTfbar(x));
-    document.querySelectorAll('#typeButtons button').forEach((b) => b.classList.toggle('on', b.dataset.type === c.type));
-    fillDatalist(c.category); renderWatch(); updateInfo(); updateObjBar();
-  }
-
-  async function fillDatalist(cat) {
-    const list = await loadSymbols(cat).catch(() => []);
-    if (panes[active] && panes[active].cfg.category !== cat) return;
-    $('#symbolList').innerHTML = list.map((s) => `<option value="${s.symbol}">`).join('');
+    $('#typeBtn').textContent = (CHART_TYPES[c.type] || 'Свечи') + ' ▾';
+    document.querySelectorAll('#typeMenu .mi').forEach((m) => m.classList.toggle('on', m.dataset.type === c.type));
+    loadSymbols(c.category).catch(() => {});
+    renderWatch(); updateInfo(); updateObjBar();
   }
 
   function applyToPanes(patch) {
-    const targets = state.sync ? panes : [panes[active]];
+    const useSync = (patch.category || patch.symbol) ? state.syncOpts.symbol : patch.tf ? state.syncOpts.tf : false;
+    const targets = useSync ? panes : [panes[active]];
     for (const p of targets) {
       const catChanged = patch.category && patch.category !== p.cfg.category;
       p.set(patch);
-      if (patch.type && !patch.symbol && !patch.tf && !patch.category) { p.buildSeries(); p.cross(null); } else { p.load().then(() => p.buildSeries()); p.cross(null); }
+      if (patch.type && !patch.symbol && !patch.tf && !patch.category) { p.buildSeries(); p.cross(null); }
+      else { p.load().then(() => p.buildSeries()); p.cross(null); }
       if (catChanged) p.unsubscribe();
     }
     save(); setActive(active);
   }
 
+  function applyGridSplits() {
+    const ch = $('#charts'), lay = state.layout;
+    ch.querySelectorAll('.gsplit').forEach((x) => x.remove());
+    ch.style.gridTemplateColumns = ''; ch.style.gridTemplateRows = '';
+    const sp = state.splits[lay] || {};
+    const addSplit = (dir, idx, pct, total) => {
+      const h = document.createElement('div');
+      h.className = 'gsplit ' + dir;
+      h.style[dir === 'v' ? 'left' : 'top'] = pct + '%';
+      h.onmousedown = (e) => {
+        e.preventDefault(); h.classList.add('drag');
+        const rect = ch.getBoundingClientRect();
+        const move = (ev) => {
+          const p = dir === 'v' ? ((ev.clientX - rect.left) / rect.width) * 100 : ((ev.clientY - rect.top) / rect.height) * 100;
+          const clamped = Math.max(15, Math.min(85, p));
+          if (total === 2) {
+            const arr = [clamped, 100 - clamped];
+            sp[dir] = arr;
+            ch.style[dir === 'v' ? 'gridTemplateColumns' : 'gridTemplateRows'] = arr.map((x) => x.toFixed(2) + '%').join(' ');
+            h.style[dir === 'v' ? 'left' : 'top'] = clamped + '%';
+          } else if (total === 3 && dir === 'v') {
+            const arr = sp.v || [33.33, 33.34, 33.33];
+            const min = idx === 0 ? 15 : arr[0] + 15;
+            const max = idx === 0 ? 100 - arr[2] - 15 : 85;
+            const c2 = Math.max(min, Math.min(max, p));
+            if (idx === 0) { const s = arr[0] + arr[1]; arr[0] = c2; arr[1] = s - c2; }
+            else { const s = arr[1] + arr[2]; arr[1] = c2 - arr[0]; arr[2] = arr[0] + s - c2; }
+            sp.v = arr;
+            ch.style.gridTemplateColumns = arr.map((x) => x.toFixed(2) + '%').join(' ');
+            h.style.left = c2 + '%';
+          }
+          panes.forEach((pn) => pn.chart.resize(pn.cv.clientWidth, pn.cv.clientHeight));
+        };
+        const up = () => {
+          h.classList.remove('drag');
+          window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up);
+          state.splits[lay] = sp; save();
+        };
+        window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+      };
+      ch.appendChild(h);
+    };
+    if (lay === '2v' || lay === '3' || lay === '4') {
+      const c = sp.v || [50, 50];
+      ch.style.gridTemplateColumns = c.map((x) => x + '%').join(' ');
+      addSplit('v', 0, c[0], 2);
+    }
+    if (lay === '2h' || lay === '3' || lay === '4' || lay === '6') {
+      const r = sp.h || [50, 50];
+      ch.style.gridTemplateRows = r.map((x) => x + '%').join(' ');
+      addSplit('h', 0, r[0], 2);
+    }
+    if (lay === '6') {
+      const c = sp.v || [33.33, 33.34, 33.33];
+      ch.style.gridTemplateColumns = c.map((x) => x + '%').join(' ');
+      addSplit('v', 0, c[0], 3);
+      addSplit('v', 1, c[0] + c[1], 3);
+    }
+  }
+
   function ensureLayout() {
-    const n = +state.layout;
-    $('#charts').className = 'l' + n;
+    const lay = state.layout = normLayout(state.layout);
+    const n = { '1': 1, '2v': 2, '2h': 2, '3': 3, '4': 4, '6': 6 }[lay] || 1;
+    $('#charts').className = 'l' + lay;
     while (panes.length > n) panes.pop().destroy();
     while (panes.length < n) {
-      const base = panes[0] ? { ...panes[panes.length - 1].cfg } : (state.panes[panes.length] || { category: state.category, symbol: 'BTCUSDT', tf: '60', type: 'candles' });
+      const prev = panes[panes.length - 1];
+      const base = prev ? { ...prev.cfg, indicators: [], compares: [] } : { category: state.category, symbol: 'BTCUSDT', tf: '60', type: 'candles', indicators: [], compares: [] };
       const cfg = state.panes[panes.length] ? { ...state.panes[panes.length] } : base;
       panes.push(new Pane($('#charts'), cfg));
     }
-    document.querySelectorAll('#layoutButtons button').forEach((b) => b.classList.toggle('on', +b.dataset.layout === n));
+    $('#gridBtn').textContent = (LAYOUT_LABELS[lay] || '▢') + ' ▾';
+    document.querySelectorAll('#gridMenu .mi').forEach((m) => m.classList.toggle('on', m.dataset.layout === lay));
+    applyGridSplits();
     setActive(Math.min(active, n - 1));
   }
 
-  // watchlist
+  // ---------- Symbol Search & Compare ----------
+  function openSymbolPicker(initialQuery = '') {
+    PMTUx.openSymbolSearch({
+      mode: 'symbol',
+      defaultCat: 'all',
+      initialQuery,
+      onPick: (item) => {
+        const w = state.watch[item.category] || (state.watch[item.category] = DEFAULT_WATCH.slice());
+        if (!w.includes(item.symbol)) w.push(item.symbol);
+        state.category = item.category;
+        applyToPanes({ category: item.category, symbol: item.symbol });
+        pollTickers();
+      },
+    });
+  }
+  function openCompareFor(pane) {
+    PMTUx.openSymbolSearch({
+      mode: 'compare',
+      defaultCat: pane.cfg.category,
+      onPick: (item) => {
+        pane.cfg.compares = pane.cfg.compares || [];
+        if (pane.cfg.compares.some((x) => x.category === item.category && x.symbol === item.symbol)) return;
+        pane.cfg.compares.push({ category: item.category, symbol: item.symbol, color: CMP_COLORS[pane.cfg.compares.length % CMP_COLORS.length] });
+        save(); pane.syncCompares();
+      },
+    });
+  }
+
+  // ---------- Cloud Layouts (/api/layouts) ----------
+  let cloudLayouts = [];
+  async function refreshCloudLayouts() {
+    try {
+      cloudLayouts = (await call('GET', 'layouts')).layouts || [];
+      $('#cloudLayoutName').textContent = state.layoutName || 'Макет';
+      $('#cloudLayoutList').innerHTML = cloudLayouts.map((l) =>
+        `<div class="lrow${l.name === state.layoutName ? ' on' : ''}" data-lid="${l.id}"><span>${esc(l.name)}</span><button class="ldel" data-ldel="${l.id}" title="Удалить">✕</button></div>`
+      ).join('') || '<div style="padding:6px 10px;color:var(--mut)">Нет сохранённых макетов</div>';
+    } catch { /* ignore */ }
+  }
+  async function saveCloudLayout(asNew) {
+    let name = state.layoutName;
+    if (asNew || !name) {
+      name = (prompt('Название рабочего пространства', name || '') || '').trim();
+      if (!name) return;
+    }
+    const payload = {
+      layout: state.layout, syncOpts: state.syncOpts, splits: state.splits,
+      theme: state.theme, tz: state.tz, panes: panes.map((p) => p.cfg),
+    };
+    try {
+      await call('POST', 'layouts', null, { name, layout: payload });
+      state.layoutName = name; save();
+      await refreshCloudLayouts();
+      PMTUx.toast('Макет сохранён: ' + name, 'ok');
+    } catch (e) { PMTUx.toast(e.message, 'err'); }
+  }
+  function loadCloudLayout(l) {
+    if (!l || !l.layout) return;
+    const d = l.layout;
+    state.layoutName = l.name;
+    state.layout = normLayout(d.layout);
+    if (d.syncOpts) state.syncOpts = d.syncOpts;
+    if (d.splits) state.splits = d.splits;
+    if (d.theme) { state.theme = d.theme; $('#theme').value = state.theme; document.body.classList.toggle('light', state.theme === 'light'); }
+    if (d.tz) { state.tz = d.tz; $('#tz').value = state.tz; }
+    state.panes = d.panes || [];
+    while (panes.length) panes.pop().destroy();
+    syncSyncUi();
+    ensureLayout();
+    panes.forEach((p) => p.applyTheme());
+    save(); refreshCloudLayouts();
+    PMTUx.toast('Загружен макет: ' + l.name, 'ok');
+  }
+
+  // ---------- watchlist ----------
   const watchFor = (cat) => state.watch[cat] || (state.watch[cat] = DEFAULT_WATCH.slice());
   let tickers = {};
   function renderWatch() {
@@ -597,9 +976,7 @@
       row('Funding', fr) + row('След. funding', t.nextFunding ? fmtTime(t.nextFunding / 1000, { hour: '2-digit', minute: '2-digit' }) : '') + row('Open Interest', t.oi);
   }
 
-
-
-  // ---------- price scale context menu (TradingView-like) ----------
+  // ---------- price scale context menu ----------
   let scaleMenu = null;
   const hideScaleMenu = () => { if (scaleMenu) { scaleMenu.remove(); scaleMenu = null; document.removeEventListener('keydown', scaleMenuEsc); } };
   const scaleMenuEsc = (e) => { if (e.key === 'Escape') hideScaleMenu(); };
@@ -631,12 +1008,12 @@
     document.addEventListener('keydown', scaleMenuEsc);
   }
 
-  // ---------- drawing tools wiring ----------
+  // ---------- drawing tools & ruler wiring ----------
   let tool = 'cursor';
   const TOOL_GLYPHS = { hline: '─', vline: '│', trend: '╱', ray: '↗', channel: '▱', rect: '▭', fibret: 'Fib', fibext: 'FbE', fibfan: 'Fan', fibtime: 'FbT', pitchfork: 'Ψ', text: 'T', arrow: '➚', pricelabel: '$', pencil: '✎' };
   const TOOL_BUTTONS = [['cursor', '⌖', 'Курсор / выбор'], ...Object.entries(PMTDraw.NAMES).filter(([k]) => !PMTDraw.SERVICE.includes(k)).map(([k, n]) => [k, TOOL_GLYPHS[k], n])]
     .map(([k, g, n]) => `<button data-tool="${k}" title="${n}"${k === 'cursor' ? ' class="on"' : ''}>${g}</button>`).join('');
-  // per-pane timeframe widget: each chart switches its own TF; the checkbox "синхр." spreads it to all
+
   function buildTfbar(p) {
     const el = document.createElement('div'); el.className = 'tfdd';
     const menu = TFS.map(([v, n]) => `<div data-tf="${v}">${n}</div>`).join('');
@@ -645,7 +1022,7 @@
     el.querySelector('.tfm').onclick = (e) => {
       const b = e.target.closest('[data-tf]'); if (!b) return;
       el.querySelector('.tfm').classList.add('hidden');
-      if (b.dataset.tf !== p.cfg.tf) { // always only this pane, even with "синхр." on
+      if (b.dataset.tf !== p.cfg.tf) {
         const i = panes.indexOf(p); if (i >= 0 && i !== active) setActive(i);
         p.set({ tf: b.dataset.tf }); p.load().then(() => p.buildSeries()); p.cross(null); save(); syncTfbar(p);
       }
@@ -659,7 +1036,6 @@
     if (btn && t) btn.textContent = t[1] + ' ▾';
     p.el.querySelectorAll('.tfm [data-tf]').forEach((b) => b.classList.toggle('on', b.dataset.tf === p.cfg.tf));
   }
-  // per-pane floating tool strip; the strip belongs to its pane, one tool is shared globally
   function buildTools(p) {
     const el = document.createElement('div'); el.className = 'pTools';
     el.innerHTML = TOOL_BUTTONS + '<button class="clr" title="Удалить все объекты на этом символе">⌫</button>';
@@ -680,28 +1056,36 @@
     onServiceRemove: (dw) => { const p = panes.find((x) => x.dw === dw); if (p) saveLevels(p); },
   };
   function setTool(t) {
+    if (t !== 'cursor' && rulerMode) setRuler(false);
     tool = t; document.querySelectorAll('.pTools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
     panes.forEach((p) => { if (t === 'cursor') p.dw.creating = null; p.cv.style.cursor = t === 'cursor' ? '' : 'crosshair'; p.dw.request(); });
+  }
+  function setRuler(on) {
+    rulerMode = on;
+    $('#btnRuler').classList.toggle('on', on);
+    if (on) setTool('cursor');
+    panes.forEach((p) => { p.cv.style.cursor = on ? 'crosshair' : (tool === 'cursor' ? '' : 'crosshair'); });
   }
   function updateObjBar() {
     const o = panes[active] && panes[active].dw.selected(), bar = $('#objBar');
     bar.classList.toggle('hidden', !o);
     if (!o) return;
-    panes[active].el.appendChild(bar); // float the bar over the pane that owns the selection
+    panes[active].el.appendChild(bar);
     $('#objName').textContent = PMTDraw.NAMES[o.type]; $('#objColor').value = PMTDraw.colorOf(o); $('#objWidth').value = o.style.width || 1;
   }
   function wireTools() {
-    document.addEventListener('mousedown', (e) => { if (!e.target.closest('.tfdd')) document.querySelectorAll('.tfdd .tfm').forEach((m) => m.classList.add('hidden')); });
+    document.addEventListener('mousedown', (e) => {
+      if (!e.target.closest('.tfdd')) document.querySelectorAll('.tfdd .tfm').forEach((m) => m.classList.add('hidden'));
+      if (!e.target.closest('.popwrap')) document.querySelectorAll('.popmenu').forEach((m) => m.classList.add('hidden'));
+    });
     $('#objColor').oninput = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.color = e.target.value; panes[active].dw.save(); panes[active].dw.request(); } };
     $('#objWidth').onchange = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.width = Math.min(6, Math.max(1, +e.target.value || 1)); panes[active].dw.save(); panes[active].dw.request(); } };
     $('#objDel').onclick = () => { panes[active].dw.remove(); };
     window.addEventListener('keydown', (e) => {
       if (/INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''))) return;
       if (e.key === 'Delete' || e.key === 'Backspace') panes[active].dw.remove();
-      else if (e.key === 'Escape') { panes[active].dw.cancel(); setTool('cursor'); }
     });
   }
-
 
   // ---------- MQL library dialog ----------
   const MQL_TEMPLATE = `//+------------------------------------------------------------------+
@@ -748,7 +1132,6 @@ if showLabels and ta.crossunder(close, ma)
     label.new(bar_index, high, "DOWN", style=label.style_label_down, color=color.red, textcolor=color.white, yloc=yloc.abovebar)
 `;
   let mqlSel = null, mqlInfo = null;
-  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const mqlMsg = (t, bad) => { const el = $('#mqlMsg'); el.textContent = t || ''; el.className = bad ? 'dn' : 'up'; };
   async function mqlRefresh(selectId) {
     const j = await call('GET', 'mql/scripts');
@@ -810,7 +1193,6 @@ if showLabels and ta.crossunder(close, ma)
     };
   }
 
-
   // ---------- strategy tester ----------
   let tChart = null, tLast = null, tShown = 0;
   const nf = (x, d = 2) => (x === null || x === undefined || Number.isNaN(x) ? '—' : Number(x).toLocaleString('ru-RU', { maximumFractionDigits: d, minimumFractionDigits: d }));
@@ -845,7 +1227,7 @@ if showLabels and ta.crossunder(close, ma)
     dd.setData(pts.map((p) => { peak = Math.max(peak, p.value); return { time: p.time, value: -((peak - p.value) / peak) * 100 }; }));
     tChart.timeScale().fitContent();
     tShown = 0; $('#tTrades').innerHTML = ''; tMoreTrades();
-    tMsg(`#${r.testId} · ${r.symbol || ''} ${r.tf ? '' : ''}`.trim());
+    tMsg(`#${r.testId} · ${r.symbol || ''}`.trim());
   }
   function tMoreTrades() {
     const r = tLast; if (!r) return; const rows = r.trades.slice().reverse().slice(tShown, tShown + 100);
@@ -870,7 +1252,7 @@ if showLabels and ta.crossunder(close, ma)
     $('#tScript').onchange = () => tDescribe().catch((e) => tMsg(e.message, true));
     $('#tHist').onclick = async (e) => {
       const del = e.target.dataset.tdel; if (del) { await call('DELETE', 'tester/' + del); tHistory(); return; }
-      const row = e.target.closest('.mrow'); if (!row) return; try { const r = await call('GET', 'tester/' + row.dataset.tid); r.tf = r.tf; tShowResult(r); tMsg(`#${r.testId} ${r.symbol} ${r.tf} · ${fdt(r.from).slice(0, 10)} → ${fdt(r.to).slice(0, 10)}`); } catch (x) { tMsg(x.message, true); }
+      const row = e.target.closest('.mrow'); if (!row) return; try { const r = await call('GET', 'tester/' + row.dataset.tid); tShowResult(r); tMsg(`#${r.testId} ${r.symbol} ${r.tf} · ${fdt(r.from).slice(0, 10)} → ${fdt(r.to).slice(0, 10)}`); } catch (x) { tMsg(x.message, true); }
     };
     $('#tRun').onclick = async () => {
       const id = +$('#tScript').value; if (!id) { tMsg('Выберите стратегию', true); return; }
@@ -887,16 +1269,19 @@ if showLabels and ta.crossunder(close, ma)
     };
     $('#tOnChart').onclick = () => {
       if (!tLast || !$('#tScript').value) return;
-      const p = panes[active], params = {}; document.querySelectorAll('#tInputs [data-ti]').forEach((i) => { params[i.dataset.ti] = i.dataset.k === 'bool' ? i.checked : i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
+      const params = {}; document.querySelectorAll('#tInputs [data-ti]').forEach((i) => { params[i.dataset.ti] = i.dataset.k === 'bool' ? i.checked : i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
       applyToPanes({ category: $('#tCat').value, symbol: $('#tSym').value.trim().toUpperCase(), tf: $('#tTf').value });
       setTimeout(() => { panes[active].cfg.indicators.push({ uid: Date.now() + '' + Math.floor(Math.random() * 1000), type: 'mql', scriptId: +$('#tScript').value, name: ($('#tScript').selectedOptions[0] || {}).text || 'strategy', params, meta: { inputs: [] }, visible: true }); save(); panes[active].refreshIndicators(true); $('#testDlg').classList.add('hidden'); }, 1500);
-      void p;
     };
   }
 
   // ---------- indicators dialog & templates ----------
   const tplAll = () => store.get('tpl', {});
-  function renderInd() {
+  function openIndForUid(uid) {
+    $('#indDlg').classList.remove('hidden');
+    renderInd(uid);
+  }
+  function renderInd(focusUid) {
     const p = panes[active];
     $('#indFor').textContent = `— окно ${active + 1}: ${p.cfg.symbol}`;
     const cats = {};
@@ -906,16 +1291,20 @@ if showLabels and ta.crossunder(close, ma)
     $('#indList').innerHTML = p.cfg.indicators.map((inst) => {
       if (inst.type === 'mql') {
         const ps = (inst.meta && inst.meta.inputs || []).map((q) => { const cur = inst.params[q.name] ?? q.default; return q.kind === 'bool' ? `<label>${esc(q.title || q.name)} <input type="checkbox" ${cur ? 'checked' : ''} data-u="${inst.uid}" data-mp="${q.name}" data-k="bool"></label>` : `<label>${esc(q.title || q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" value="${String(cur).replace(/"/g, '&quot;')}" data-u="${inst.uid}" data-mp="${q.name}" data-k="${q.kind}"></label>`; }).join('');
-        return `<div class="card"><div class="h"><input type="checkbox" data-u="${inst.uid}" data-vis ${inst.visible !== false ? 'checked' : ''}><span>MQL: ${inst.name}</span><span class="grow"></span><button data-u="${inst.uid}" data-del>Удалить</button></div><div>${ps}</div></div>`;
+        return `<div class="card" data-card-uid="${inst.uid}"><div class="h"><input type="checkbox" data-u="${inst.uid}" data-vis ${inst.visible !== false ? 'checked' : ''}><span>MQL: ${esc(inst.name)}</span><span class="grow"></span><button data-u="${inst.uid}" data-del>Удалить</button></div><div>${ps}</div></div>`;
       }
       const d = PMTInd.REG[inst.type];
       const ps = d.params.map((q) => q.type === 'select'
         ? `<label>${q.label} <select data-u="${inst.uid}" data-p="${q.k}">${q.options.map((o) => `<option${o === inst.params[q.k] ? ' selected' : ''}>${o}</option>`).join('')}</select></label>`
         : `<label>${q.label} <input type="number" step="${q.step || 1}" value="${inst.params[q.k]}" data-u="${inst.uid}" data-p="${q.k}"></label>`).join('');
       const cs = d.outputs.map((o) => `<label>${o.label} <input type="color" value="${(inst.style.colors && inst.style.colors[o.k]) || o.color}" data-u="${inst.uid}" data-c="${o.k}"></label>`).join('');
-      return `<div class="card"><div class="h"><input type="checkbox" data-u="${inst.uid}" data-vis ${inst.visible !== false ? 'checked' : ''} title="Показать/скрыть"><span>${d.name}</span><span class="grow"></span><button data-u="${inst.uid}" data-del>Удалить</button></div>
+      return `<div class="card" data-card-uid="${inst.uid}"><div class="h"><input type="checkbox" data-u="${inst.uid}" data-vis ${inst.visible !== false ? 'checked' : ''} title="Показать/скрыть"><span>${d.name}</span><span class="grow"></span><button data-u="${inst.uid}" data-del>Удалить</button></div>
         <div>${ps}</div><div>${cs}<label>Толщина <input type="number" min="1" max="5" value="${inst.style.width || 1}" data-u="${inst.uid}" data-w></label></div></div>`;
     }).join('') || '<div style="color:var(--mut)">Нет индикаторов. Выберите из списка и нажмите «Добавить».</div>';
+    if (focusUid) {
+      const card = document.querySelector(`.card[data-card-uid="${focusUid}"]`);
+      if (card) { card.scrollIntoView({ block: 'center' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1500); }
+    }
   }
   function indEvent(e) {
     const el = e.target, u = el.dataset && el.dataset.u; if (!u) return;
@@ -944,7 +1333,7 @@ if showLabels and ta.crossunder(close, ma)
     $('#tplDel').onclick = () => { const t = tplAll(), k = $('#tplSel').value; if (k) { delete t[k]; store.set('tpl', t); renderInd(); } };
     $('#tplApply').onclick = () => {
       const tpl = tplAll()[$('#tplSel').value]; if (!tpl) return;
-      for (const p of (state.sync ? panes : [panes[active]])) {
+      for (const p of (state.syncOpts.symbol ? panes : [panes[active]])) {
         p.cfg.type = tpl.type; p.cfg.indicators = JSON.parse(JSON.stringify(tpl.indicators)).map((x, i) => ({ ...x, uid: Date.now() + '' + i }));
         p.buildSeries();
       }
@@ -952,25 +1341,103 @@ if showLabels and ta.crossunder(close, ma)
     };
   }
 
+  function syncSyncUi() {
+    document.querySelectorAll('#syncMenu input[data-sync]').forEach((cb) => { cb.checked = !!state.syncOpts[cb.dataset.sync]; });
+    const cnt = Object.values(state.syncOpts).filter(Boolean).length;
+    $('#syncBtn').classList.toggle('on', cnt > 0);
+    $('#syncBtn').textContent = cnt ? `⇄ Синхр. (${cnt}) ▾` : '⇄ Синхр. ▾';
+  }
+
+  function wirePopmenu(btnSel, menuSel) {
+    $(btnSel).onclick = (e) => {
+      e.stopPropagation();
+      const m = $(menuSel), was = !m.classList.contains('hidden');
+      document.querySelectorAll('.popmenu').forEach((x) => x.classList.add('hidden'));
+      if (!was) m.classList.remove('hidden');
+    };
+  }
+
   function init() {
-    wireIndicators(); wireTools(); wireMql(); wireTester();
+    PMTUx.wireSymbolSearch({
+      loadSymbols,
+      symbols: (c) => symbolsByCat[c] || [],
+      tickers: () => tickers,
+      activeCategory: () => panes[active] ? panes[active].cfg.category : state.category,
+    });
+    PMTUx.wireKeyboard({
+      openSearch: (q) => openSymbolPicker(q),
+      resetView: () => panes[active] && panes[active].resetView(),
+      goToDate: () => panes[active] && PMTUx.openGoToDate(panes[active], state.tz),
+      screenshot: () => panes[active] && PMTUx.takeScreenshot(panes[active]),
+      setTool,
+      toggleRuler: () => setRuler(!rulerMode),
+      quickAlert: () => $('#btnLevels').click(),
+      onEsc: () => {
+        if (rulerMode) setRuler(false);
+        panes.forEach((p) => { p.dw.cancel(); p.ruler.clear(); });
+        setTool('cursor');
+      },
+    });
+    wireIndicators(); wireTools(); wireMql(); wireTester(); wireSettings();
+
     $('#tfButtons').innerHTML = TFS.map(([v, l]) => `<button data-tf="${v}">${l}</button>`).join('');
     $('#tfButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ tf: b.dataset.tf }); };
-    $('#typeButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ type: b.dataset.type }); };
-    $('#layoutButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) { state.layout = +b.dataset.layout; ensureLayout(); save(); } };
+    $('#symBtn').onclick = () => openSymbolPicker('');
+    $('#btnCompare').onclick = () => panes[active] && openCompareFor(panes[active]);
+
+    wirePopmenu('#typeBtn', '#typeMenu');
+    $('#typeMenu').onclick = (e) => { const b = e.target.closest('.mi'); if (b) { $('#typeMenu').classList.add('hidden'); applyToPanes({ type: b.dataset.type }); } };
+
+    wirePopmenu('#gridBtn', '#gridMenu');
+    $('#gridMenu').onclick = (e) => {
+      const b = e.target.closest('.mi'); if (!b) return;
+      $('#gridMenu').classList.add('hidden');
+      state.layout = b.dataset.layout; ensureLayout(); save();
+    };
+
+    wirePopmenu('#syncBtn', '#syncMenu');
+    $('#syncMenu').onchange = (e) => {
+      const k = e.target.dataset && e.target.dataset.sync; if (!k) return;
+      state.syncOpts[k] = e.target.checked;
+      syncSyncUi(); save();
+    };
+    syncSyncUi();
+
+    wirePopmenu('#cloudLayoutBtn', '#cloudLayoutMenu');
+    $('#cloudLayoutMenu').onclick = async (e) => {
+      const del = e.target.closest('[data-ldel]');
+      if (del) {
+        e.stopPropagation();
+        const id = +del.dataset.ldel;
+        await call('DELETE', 'layouts/' + id).catch(() => {});
+        const rem = cloudLayouts.find((x) => x.id === id);
+        if (rem && rem.name === state.layoutName) { state.layoutName = ''; save(); }
+        refreshCloudLayouts();
+        return;
+      }
+      const row = e.target.closest('.lrow');
+      if (row) {
+        $('#cloudLayoutMenu').classList.add('hidden');
+        const l = cloudLayouts.find((x) => x.id === +row.dataset.lid);
+        if (l) loadCloudLayout(l);
+        return;
+      }
+      const act = e.target.closest('[data-la]');
+      if (act) {
+        $('#cloudLayoutMenu').classList.add('hidden');
+        await saveCloudLayout(act.dataset.la === 'saveas');
+      }
+    };
+    refreshCloudLayouts();
+
+    $('#btnRuler').onclick = () => setRuler(!rulerMode);
+    $('#btnShot').onclick = () => panes[active] && PMTUx.takeScreenshot(panes[active]);
+
     $('#category').onchange = async (e) => {
       const cat = e.target.value; const list = await loadSymbols(cat).catch(() => []);
       state.category = cat; const sym = list.find((s) => s.symbol === 'BTCUSDT') ? 'BTCUSDT' : (list[0] && list[0].symbol);
       applyToPanes({ category: cat, symbol: sym });
     };
-    $('#symbolInput').onchange = async (e) => {
-      const s = e.target.value.trim().toUpperCase(); const cat = panes[active].cfg.category;
-      const list = await loadSymbols(cat);
-      if (!list.find((x) => x.symbol === s)) { e.target.value = panes[active].cfg.symbol; return; }
-      const w = watchFor(cat); if (!w.includes(s)) w.push(s);
-      applyToPanes({ symbol: s }); pollTickers();
-    };
-    $('#syncAll').checked = state.sync; $('#syncAll').onchange = (e) => { state.sync = e.target.checked; save(); };
     $('#btnLevels').onclick = async () => {
       const p = panes[active], c = p.cfg;
       const t = tickers[c.symbol] ? parseFloat(tickers[c.symbol].last) : (p.candles.length ? p.candles[p.candles.length - 1].close : 0);
@@ -978,8 +1445,8 @@ if showLabels and ta.crossunder(close, ma)
       const prec = p.precision(), up = +(t * 1.01).toFixed(prec), lo = +(t * 0.99).toFixed(prec);
       await saveLevels({ cfg: c, dw: { service: [{ id: LVL_UP, pts: [{ p: up }] }, { id: LVL_DN, pts: [{ p: lo }] }] } }).catch(() => {});
       applyLevels(p, { upper: up, lower: lo });
+      PMTUx.toast('Уровни установлены (±1%)', 'ok');
     };
-    wireSettings();
     $('#tz').value = state.tz; $('#tz').onchange = (e) => { state.tz = e.target.value; panes.forEach((p) => p.applyTheme()); save(); };
     $('#theme').value = state.theme; $('#theme').onchange = (e) => { state.theme = e.target.value; document.body.classList.toggle('light', state.theme === 'light'); panes.forEach((p) => p.applyTheme()); save(); };
     document.body.classList.toggle('light', state.theme === 'light');

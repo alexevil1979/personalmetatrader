@@ -6,10 +6,16 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 
 use PMT\Core\Db;
 
-$sql = file_get_contents(PMT_ROOT . '/database/schema.sql');
+$sql = str_replace("\r\n", "\n", (string) file_get_contents(PMT_ROOT . '/database/schema.sql'));
 $pdo = Db::pdo();
 $n = 0;
-foreach (array_filter(array_map('trim', explode(";\n", $sql))) as $stmt) {
+foreach (explode(";\n", $sql) as $raw) {
+    // Strip leading/trailing whitespace and full-line SQL comments before checking emptiness
+    $lines = array_filter(explode("\n", $raw), static fn(string $l): bool => ($t = trim($l)) !== '' && !str_starts_with($t, '--'));
+    $stmt = trim(implode("\n", $lines));
+    if ($stmt === '') {
+        continue;
+    }
     try {
         $pdo->exec($stmt);
         $n++;

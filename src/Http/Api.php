@@ -7,6 +7,7 @@ use InvalidArgumentException;
 use PMT\Bybit\Market;
 use PMT\Core\Auth;
 use PMT\Core\Cache;
+use PMT\Core\Crypto;
 use PMT\Core\Db;
 use PMT\Core\Env;
 use PMT\Core\Log;
@@ -138,8 +139,12 @@ final class Api
                 }
                 $pw = (string) ($b['password'] ?? '');
                 Auth::checkPassword($pw);
-                $pdo->prepare('UPDATE users SET password_hash=? WHERE id=?')->execute([password_hash($pw, defined('PASSWORD_ARGON2ID') ? PASSWORD_ARGON2ID : PASSWORD_DEFAULT), $u['id']]);
-                Log::write('auth', 'password changed', (int) $u['id']);
+                $uid = (int) $u['id'];
+                $pdo = Db::pdo();
+                $pdo->prepare('UPDATE users SET password_hash=? WHERE id=?')->execute([password_hash($pw, defined('PASSWORD_ARGON2ID') ? PASSWORD_ARGON2ID : PASSWORD_DEFAULT), $uid]);
+                $pdo->prepare('DELETE FROM auth_tokens WHERE user_id=?')->execute([$uid]);
+                Auth::issueRemember($uid);
+                Log::write('auth', 'password changed', $uid);
                 self::out(['ok' => true]);
                 return;
             }
@@ -254,14 +259,31 @@ final class Api
             self::mql($path, $method, $uid);
             return;
         }
+        if ($path === '/api/layouts' || preg_match('#^/api/layouts/(\d+)$#', $path, $lm)) {
+            self::layouts($path, $method, $uid, isset($lm[1]) ? (int) $lm[1] : null);
+            return;
+        }
         switch ($path) {
             case '/api/notify/test': {
+                if ($method !== 'POST') {
+                    self::out(['error' => 'method'], 405);
+                    return;
+                }
+                $b = self::body(2000);
                 $st = $pdo->prepare('SELECT telegram_token, telegram_chat, tg_proxy FROM user_notify WHERE user_id=?');
                 $st->execute([$uid]);
                 $s = $st->fetch() ?: [];
-                $tok = trim((string) ($b['telegram_token'] ?? '')) ?: (string) ($s['telegram_token'] ?? '') ?: (string) Env::get('TELEGRAM_BOT_TOKEN', '');
+                $dbTok = Crypto::decrypt($s['telegram_token'] ?? null);
+                $dbProxy = Crypto::decrypt($s['tg_proxy'] ?? null);
+                $rawTok = trim((string) ($b['telegram_token'] ?? ''));
+                $rawProxy = trim((string) ($b['tg_proxy'] ?? ''));
+                $tok = ($rawTok !== '' && $rawTok !== '__KEEP__') ? $rawTok : ($dbTok !== '' ? $dbTok : (string) Env::get('TELEGRAM_BOT_TOKEN', ''));
                 $chat = trim((string) ($b['telegram_chat'] ?? '')) ?: (string) ($s['telegram_chat'] ?? '') ?: (string) Env::get('TELEGRAM_CHAT_ID', '');
-                $proxy = trim((string) ($b['tg_proxy'] ?? '')) ?: (string) ($s['tg_proxy'] ?? '') ?: (string) Env::get('TELEGRAM_PROXY', '');
+                $proxy = ($rawProxy !== '' && $rawProxy !== '__KEEP__') ? $rawProxy : ($dbProxy !== '' ? $dbProxy : (string) Env::get('TELEGRAM_PROXY', ''));
+                if ($proxy !== '' && Tg::proxyOpts($proxy) === null) {
+                    self::out(['error' => 'Неверный формат прокси — ожидается scheme://[user:pass@]host:port (http, https, socks4, socks5)'], 400);
+                    return;
+                }
                 if ($tok === '' || $chat === '') {
                     self::out(['error' => 'Укажите токен бота и ID чата'], 400);
                     return;
@@ -287,6 +309,17 @@ final class Api
                     $tok = isset($b['telegram_token']) ? trim((string) $b['telegram_token']) : '';
                     $chat = isset($b['telegram_chat']) ? trim((string) $b['telegram_chat']) : '';
                     $proxy = isset($b['tg_proxy']) ? trim((string) $b['tg_proxy']) : '';
+                    if ($tok === '__KEEP__' || $proxy === '__KEEP__') {
+                        $st = $pdo->prepare('SELECT telegram_token, tg_proxy FROM user_notify WHERE user_id=?');
+                        $st->execute([$uid]);
+                        $cur = $st->fetch() ?: [];
+                        if ($tok === '__KEEP__') {
+                            $tok = Crypto::decrypt($cur['telegram_token'] ?? null);
+                        }
+                        if ($proxy === '__KEEP__') {
+                            $proxy = Crypto::decrypt($cur['tg_proxy'] ?? null);
+                        }
+                    }
                     if (mb_strlen($tok) > 128 || mb_strlen($chat) > 64 || mb_strlen($proxy) > 255) {
                         self::out(['error' => 'too long'], 400);
                         return;
@@ -295,14 +328,25 @@ final class Api
                         self::out(['error' => 'Неверный формат прокси — ожидается scheme://[user:pass@]host:port (http, https, socks4, socks5)'], 400);
                         return;
                     }
-                    $pdo->prepare('INSERT INTO user_notify (user_id, telegram_token, telegram_chat, tg_proxy) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE telegram_token=VALUES(telegram_token), telegram_chat=VALUES(telegram_chat), tg_proxy=VALUES(tg_proxy)')->execute([$uid, $tok !== '' ? $tok : null, $chat !== '' ? $chat : null, $proxy !== '' ? $proxy : null]);
+                    $encTok = $tok !== '' ? Crypto::encrypt($tok) : null;
+                    $encProxy = $proxy !== '' ? Crypto::encrypt($proxy) : null;
+                    $pdo->prepare('INSERT INTO user_notify (user_id, telegram_token, telegram_chat, tg_proxy) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE telegram_token=VALUES(telegram_token), telegram_chat=VALUES(telegram_chat), tg_proxy=VALUES(tg_proxy)')
+                        ->execute([$uid, $encTok, $chat !== '' ? $chat : null, $encProxy]);
                     self::out(['ok' => true]);
                     return;
                 }
                 $st = $pdo->prepare('SELECT telegram_token, telegram_chat, tg_proxy FROM user_notify WHERE user_id=?');
                 $st->execute([$uid]);
                 $r = $st->fetch() ?: ['telegram_token' => null, 'telegram_chat' => null, 'tg_proxy' => null];
-                self::out(['telegram_token' => $r['telegram_token'], 'telegram_chat' => $r['telegram_chat'], 'tg_proxy' => $r['tg_proxy']]);
+                $tok = Crypto::decrypt($r['telegram_token'] ?? null);
+                $proxy = Crypto::decrypt($r['tg_proxy'] ?? null);
+                self::out([
+                    'telegram_token_set' => $tok !== '',
+                    'telegram_token_mask' => Crypto::mask($tok),
+                    'telegram_chat' => $r['telegram_chat'],
+                    'tg_proxy_set' => $proxy !== '',
+                    'tg_proxy_mask' => Crypto::mask($proxy),
+                ]);
                 return;
             }
             case '/api/levels': {
@@ -449,5 +493,69 @@ final class Api
                 return;
         }
         self::out(['error' => 'not found'], 404);
+    }
+
+    private static function layouts(string $path, string $method, int $uid, ?int $id): void
+    {
+        $pdo = Db::pdo();
+        if ($id !== null) {
+            if ($method !== 'DELETE') {
+                self::out(['error' => 'method'], 405);
+                return;
+            }
+            $pdo->prepare('DELETE FROM chart_layouts WHERE id=? AND user_id=?')->execute([$id, $uid]);
+            self::out(['ok' => true]);
+            return;
+        }
+        if ($method === 'GET') {
+            $st = $pdo->prepare('SELECT id, name, layout, is_default, updated_at FROM chart_layouts WHERE user_id=? ORDER BY is_default DESC, updated_at DESC');
+            $st->execute([$uid]);
+            $rows = array_map(static fn(array $r): array => [
+                'id' => (int) $r['id'],
+                'name' => $r['name'],
+                'is_default' => (bool) $r['is_default'],
+                'updated_at' => $r['updated_at'],
+                'layout' => json_decode((string) $r['layout'], true),
+            ], $st->fetchAll());
+            self::out(['layouts' => $rows]);
+            return;
+        }
+        if ($method === 'POST') {
+            $b = self::body(256000);
+            $name = trim(mb_substr((string) ($b['name'] ?? ''), 0, 80));
+            $layout = $b['layout'] ?? null;
+            if ($name === '' || !is_array($layout)) {
+                throw new InvalidArgumentException('bad layout');
+            }
+            $json = json_encode($layout, JSON_UNESCAPED_UNICODE);
+            if ($json === false || strlen($json) > 250000) {
+                throw new InvalidArgumentException('layout too large');
+            }
+            $isDef = !empty($b['is_default']) ? 1 : 0;
+            $st = $pdo->prepare('SELECT id FROM chart_layouts WHERE user_id=? AND name=?');
+            $st->execute([$uid, $name]);
+            $existingId = $st->fetchColumn();
+            if (!$existingId) {
+                $cnt = (int) $pdo->query("SELECT COUNT(*) FROM chart_layouts WHERE user_id=" . $uid)->fetchColumn();
+                if ($cnt >= 30) {
+                    throw new InvalidArgumentException('Максимум 30 сохранённых рабочих пространств');
+                }
+            }
+            $pdo->beginTransaction();
+            if ($isDef) {
+                $pdo->prepare('UPDATE chart_layouts SET is_default=0 WHERE user_id=?')->execute([$uid]);
+            }
+            if ($existingId) {
+                $pdo->prepare('UPDATE chart_layouts SET layout=?, is_default=? WHERE id=? AND user_id=?')->execute([$json, $isDef, (int) $existingId, $uid]);
+                $outId = (int) $existingId;
+            } else {
+                $pdo->prepare('INSERT INTO chart_layouts (user_id, name, layout, is_default) VALUES (?,?,?,?)')->execute([$uid, $name, $json, $isDef]);
+                $outId = (int) $pdo->lastInsertId();
+            }
+            $pdo->commit();
+            self::out(['ok' => true, 'id' => $outId, 'name' => $name]);
+            return;
+        }
+        self::out(['error' => 'method'], 405);
     }
 }
