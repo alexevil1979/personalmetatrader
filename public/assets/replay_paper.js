@@ -223,18 +223,66 @@
   function getPositionOverlays(cat, sym, lastTime) {
     if (!acct) return [];
     const out = [], t = lastTime || Math.floor(Date.now() / 1000);
+    const px = curPriceFor(cat, sym);
     for (const pos of acct.positions) {
       if (pos.category !== cat || pos.symbol !== sym) continue;
-      const lbl = `${pos.side.toUpperCase()} ${pos.qty}`;
-      out.push({ id: -20000 - pos.id, type: 'alertline', pts: [{ t, p: pos.entry_price }], style: { text: lbl, color: '#2962ff', locked: true } });
-      if (pos.sl) out.push({ id: -30000 - pos.id, type: 'alertline', pts: [{ t, p: pos.sl }], style: { text: 'SL', color: '#ef5350', locked: true } });
-      if (pos.tp) out.push({ id: -40000 - pos.id, type: 'alertline', pts: [{ t, p: pos.tp }], style: { text: 'TP', color: '#26a69a', locked: true } });
+      const upl = px !== null ? (pos.side === 'long' ? 1 : -1) * (px - pos.entry_price) * pos.qty : null;
+      const uplStr = upl !== null ? ` (${upl >= 0 ? '+' : ''}${nf(upl)})` : '';
+      const lbl = `${pos.side.toUpperCase()} ${pos.qty}${uplStr}`;
+      out.push({ id: -20000 - pos.id, type: 'tradeline', pts: [{ t, p: pos.entry_price }], style: { text: lbl, color: '#2962ff', locked: true } });
+      if (pos.sl) out.push({ id: -30000 - pos.id, type: 'tradeline', pts: [{ t, p: pos.sl }], style: { text: 'SL', color: '#ef5350', dash: 'dashed', locked: false } });
+      if (pos.tp) out.push({ id: -40000 - pos.id, type: 'tradeline', pts: [{ t, p: pos.tp }], style: { text: 'TP', color: '#26a69a', dash: 'dashed', locked: false } });
     }
     for (const o of acct.orders) {
       if (o.category !== cat || o.symbol !== sym || !o.price) continue;
-      out.push({ id: -50000 - o.id, type: 'alertline', pts: [{ t, p: o.price }], style: { text: `${o.order_type.toUpperCase()} ${o.side.toUpperCase()} ${o.qty}`, color: '#ab47bc', locked: true } });
+      out.push({ id: -50000 - o.id, type: 'tradeline', pts: [{ t, p: o.price }], style: { text: `${o.order_type.toUpperCase()} ${o.side.toUpperCase()} ${o.qty}`, color: '#ab47bc', dash: 'dashed', locked: true } });
     }
     return out;
+  }
+  async function dragSlTp(posId, field, price) {
+    if (!ppHooks || !acct) return;
+    const pos = acct.positions.find((x) => x.id === posId);
+    if (!pos) return;
+    const sl = field === 'sl' ? price : pos.sl;
+    const tp = field === 'tp' ? price : pos.tp;
+    try {
+      acct = await ppHooks.call('PUT', `paper/position/${posId}`, null, { sl, tp });
+      renderAll();
+      ppHooks.toast(price === null ? `${field.toUpperCase()} удалён` : `${field.toUpperCase()} перемещён: ${price}`, 'ok');
+    } catch (err) {
+      renderAll();
+      ppHooks.toast(err.message, 'err');
+    }
+  }
+  async function cancelOrderById(ordId) {
+    if (!ppHooks) return;
+    try {
+      acct = await ppHooks.call('DELETE', 'paper/order/' + ordId);
+      renderAll();
+      ppHooks.toast('Лимитный/стоп ордер отменён', 'ok');
+    } catch (err) { ppHooks.toast(err.message, 'err'); }
+  }
+  async function quickOrderAt(cat, sym, side, price) {
+    if (!ppHooks) return;
+    const cur = curPriceFor(cat, sym);
+    const orderType = !cur ? 'limit' : (side === 'buy' ? (price <= cur ? 'limit' : 'stop') : (price >= cur ? 'limit' : 'stop'));
+    const qtyEl = $('#ppQty');
+    const qty = Math.max(0.0001, parseFloat(qtyEl ? qtyEl.value : '0.01') || 0.01);
+    try {
+      acct = await ppHooks.call('POST', 'paper/order', null, { category: cat, symbol: sym, side, order_type: orderType, qty, price });
+      renderAll();
+      ppHooks.toast(`${orderType.toUpperCase()} ${side.toUpperCase()} ${qty} ${sym} @ ${price}`, 'ok');
+    } catch (err) { ppHooks.toast(err.message, 'err'); }
+  }
+  async function quickMarket(cat, sym, side, qty) {
+    if (!ppHooks) return;
+    const rp = getReplayPrice(cat, sym);
+    const q = Math.max(0.0001, parseFloat(qty) || parseFloat($('#ppQty')?.value || '0.01') || 0.01);
+    try {
+      acct = await ppHooks.call('POST', 'paper/order', null, { category: cat, symbol: sym, side, order_type: 'market', qty: q, replay: rp !== null, ref_price: rp });
+      renderAll();
+      ppHooks.toast(`Market ${side.toUpperCase()} ${q} ${sym}`, 'ok');
+    } catch (err) { ppHooks.toast(err.message, 'err'); }
   }
   function wirePaper(hooks) {
     ppHooks = hooks;
@@ -315,5 +363,6 @@
   window.PMTTrade = {
     wireReplay, updateReplayBar, isPickingReplay, pickReplayBar, isReplayActive, getReplayPrice,
     wirePaper, refreshPaper, onBarTick, onLiveTick, getPositionOverlays,
+    dragSlTp, cancelOrderById, quickOrderAt, quickMarket,
   };
 })();

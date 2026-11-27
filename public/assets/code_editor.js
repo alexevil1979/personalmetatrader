@@ -13,6 +13,22 @@
   ]);
   const NS = /\b(ta|math|str|color|array|map|strategy|label|line|box|table|request|timeframe|barstate|syminfo|log|runtime)\b|\b(indicator|strategy|plot|plotshape|plotchar|bgcolor|barcolor|hline|fill|alert|alertcondition|OnInit|OnCalculate|OnStart|init|start|SetIndexBuffer|SetIndexStyle|iMA|iRSI|iMACD|iBands|iATR|CopyBuffer|Print|Alert)\b/;
   const TOKEN_RE = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|#[A-Za-z_]\w*|#[0-9a-fA-F]{6,8}|\b\d+(?:\.\d+)?\b|\b[A-Za-z_]\w*\b)/g;
+  const COMPLETIONS = [
+    'ta.sma(src, len)', 'ta.ema(src, len)', 'ta.rma(src, len)', 'ta.wma(src, len)', 'ta.rsi(src, len)',
+    'ta.macd(src, fast, slow, sig)', 'ta.bb(src, len, mult)', 'ta.atr(len)', 'ta.supertrend(factor, atrPeriod)',
+    'ta.crossover(a, b)', 'ta.crossunder(a, b)', 'ta.highest(src, len)', 'ta.lowest(src, len)',
+    'ta.pivothigh(left, right)', 'ta.pivotlow(left, right)', 'ta.vwap', 'ta.stoch(close, high, low, len)',
+    'strategy.entry(id, dir)', 'strategy.exit(id, from_entry, stop=..., limit=..., trail_points=..., trail_offset=...)',
+    'strategy.close(id)', 'strategy.close_all()', 'strategy.cancel(id)',
+    'input.int(defval, title)', 'input.float(defval, title)', 'input.bool(defval, title)', 'input.string(defval, title)', 'input.source(defval, title)', 'input.color(defval, title)',
+    'math.abs(x)', 'math.max(a, b)', 'math.min(a, b)', 'math.round(x)', 'math.sqrt(x)',
+    'color.new(color, transp)', 'color.green', 'color.red', 'color.orange', 'color.blue', 'color.white',
+    'log.info(msg)', 'log.warning(msg)', 'log.error(msg)',
+    'alert(msg, freq)', 'alertcondition(cond, title, msg)', 'barcolor(col)', 'bgcolor(col)',
+    'plot(series, title, color)', 'plotshape(series, style, location, color)', 'hline(price, title, color)', 'fill(p1, p2, color)',
+    'label.new(x, y, text)', 'line.new(x1, y1, x2, y2)', 'box.new(left, top, right, bottom)', 'table.new(pos, cols, rows)',
+    'request.security(symbol, tf, expr)',
+  ].map((s) => ({ ins: s.replace(/\(.*\)/, ''), lbl: s }));
 
   function highlightLine(line) {
     let out = '', last = 0, m;
@@ -41,18 +57,63 @@
       this.onChange = opts.onChange || null;
       this.errLine = null;
       this.readOnly = false;
-      host.innerHTML = '<div class="ce-wrap"><div class="ce-gut"></div><div class="ce-stage"><pre class="ce-hi" aria-hidden="true"></pre><textarea class="ce-ta" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea></div></div>';
+      this.acList = []; this.acIdx = 0; this.acStart = 0;
+      host.innerHTML = '<div class="ce-wrap"><div class="ce-gut"></div><div class="ce-stage"><pre class="ce-hi" aria-hidden="true"></pre><textarea class="ce-ta" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea><div class="ce-ac hidden"></div></div></div>';
       this.gut = host.querySelector('.ce-gut');
       this.hi = host.querySelector('.ce-hi');
       this.ta = host.querySelector('.ce-ta');
-      this.ta.addEventListener('input', () => { this.errLine = null; this.sync(); if (this.onChange) this.onChange(this.ta.value); });
+      this.ac = host.querySelector('.ce-ac');
+      this.ta.addEventListener('input', () => { this.errLine = null; this.sync(); this.checkAc(false); if (this.onChange) this.onChange(this.ta.value); });
       this.ta.addEventListener('scroll', () => {
         this.hi.scrollTop = this.ta.scrollTop;
         this.hi.scrollLeft = this.ta.scrollLeft;
         this.gut.scrollTop = this.ta.scrollTop;
+        this.hideAc();
+      });
+      this.ta.addEventListener('blur', () => setTimeout(() => this.hideAc(), 150));
+      this.ac.addEventListener('mousedown', (e) => {
+        const it = e.target.closest('[data-aci]');
+        if (!it) return;
+        e.preventDefault();
+        this.applyAc(+it.dataset.aci);
       });
       this.ta.addEventListener('keydown', (e) => this.key(e));
       this.sync();
+    }
+    hideAc() { this.acList = []; if (this.ac) this.ac.classList.add('hidden'); }
+    checkAc(force) {
+      if (this.readOnly || !this.ac) return;
+      const s = this.ta.selectionStart, before = this.ta.value.slice(0, s);
+      const m = /([A-Za-z_]\w*\.[A-Za-z0-9_]*|[A-Za-z_]\w{2,})$/.exec(before);
+      if (!m || (!force && !m[1].includes('.'))) { this.hideAc(); return; }
+      const pref = m[1].toLowerCase();
+      this.acList = COMPLETIONS.filter((c) => c.ins.toLowerCase().startsWith(pref)).slice(0, 12);
+      if (!this.acList.length) { this.hideAc(); return; }
+      this.acStart = s - m[1].length;
+      this.acIdx = 0;
+      const row = before.split('\n').length;
+      const top = Math.max(4, Math.min(this.ta.clientHeight - 130, row * 17.5 - this.ta.scrollTop + 6));
+      const col = m.index - before.lastIndexOf('\n') - 1;
+      const left = Math.max(6, Math.min(this.ta.clientWidth - 230, col * 7.2 - this.ta.scrollLeft));
+      this.ac.style.top = top + 'px';
+      this.ac.style.left = left + 'px';
+      this.renderAc();
+    }
+    renderAc() {
+      this.ac.innerHTML = this.acList.map((c, i) => `<div class="ce-aci${i === this.acIdx ? ' on' : ''}" data-aci="${i}">${c.lbl}</div>`).join('');
+      this.ac.classList.remove('hidden');
+    }
+    applyAc(idx) {
+      const c = this.acList[idx]; if (!c) return;
+      const ta = this.ta, end = ta.selectionStart, v = ta.value;
+      const hasParen = c.lbl.includes('(');
+      const put = hasParen ? c.ins + '()' : c.ins;
+      ta.value = v.slice(0, this.acStart) + put + v.slice(end);
+      const caret = this.acStart + put.length - (hasParen ? 1 : 0);
+      ta.selectionStart = ta.selectionEnd = caret;
+      this.hideAc();
+      this.sync();
+      if (this.onChange) this.onChange(ta.value);
     }
     get value() { return this.ta.value; }
     set value(v) { this.ta.value = String(v ?? ''); this.errLine = null; this.sync(); }
@@ -78,6 +139,15 @@
         e.preventDefault();
         if (!this.readOnly && this.onSave) this.onSave(this.ta.value);
         return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+        e.preventDefault(); this.checkAc(true); return;
+      }
+      if (this.acList.length && !this.ac.classList.contains('hidden')) {
+        if (e.key === 'Escape') { e.preventDefault(); this.hideAc(); return; }
+        if (e.key === 'ArrowDown') { e.preventDefault(); this.acIdx = (this.acIdx + 1) % this.acList.length; this.renderAc(); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); this.acIdx = (this.acIdx - 1 + this.acList.length) % this.acList.length; this.renderAc(); return; }
+        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); this.applyAc(this.acIdx); return; }
       }
       if (this.readOnly) return;
       const ta = this.ta, s = ta.selectionStart, en = ta.selectionEnd, v = ta.value;

@@ -38,4 +38,6 @@ const dr = geom({ id: 5, type: 'daterange', pts: [{ t: 1100, p: 100 }, { t: 1700
 assert.ok(dr.T[0].s.includes('10 бар.'), 'daterange bars');
 const el = geom({ id: 6, type: 'ellipse', pts: [{ t: 1100, p: 100 }, { t: 1500, p: 200 }], style: {} }, E);
 assert.strictEqual(el.L.length, 36);
+const tl = geom({ id: -20001, type: 'tradeline', pts: [{ t: 1100, p: 150 }], style: { text: 'SL', color: '#ef5350', dash: 'dashed' } }, E);
+assert.ok(tl.T[0].pill && !tl.T[0].s.includes('🔔') && tl.T[0].s.includes('SL · 150.00'), 'tradeline pill without bell');
 console.log('OK drawings (' + Object.keys(NEED).length + ' types)');

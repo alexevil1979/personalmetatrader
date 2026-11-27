@@ -15,10 +15,11 @@
     setLocal(k, v) { try { localStorage.setItem('pmt.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
   };
 
+  const DEF_CHART_OPTS = { upColor: '', dnColor: '', showGrid: true, watermark: true, magnetCross: false, showQuickTrade: false };
   const state = {
     category: 'linear', theme: 'dark', tz: 'UTC', layout: '1',
     syncOpts: { symbol: false, tf: false, crosshair: false, range: false },
-    splits: {}, layoutName: '', favInds: [],
+    splits: {}, layoutName: '', favInds: [], chartOpts: { ...DEF_CHART_OPTS },
     watch: {}, watchFlags: {}, showWatch: true, showInfo: true, showLegend: true, panes: [],
   };
   const normLayout = (v) => (v === 2 || v === '2' ? '2v' : LAYOUT_LABELS[String(v)] ? String(v) : '1');
@@ -33,6 +34,7 @@
     delete state.sync;
     if (!state.splits || typeof state.splits !== 'object') state.splits = {};
     if (!Array.isArray(state.favInds)) state.favInds = [];
+    state.chartOpts = { ...DEF_CHART_OPTS, ...(state.chartOpts && typeof state.chartOpts === 'object' ? state.chartOpts : {}) };
     if (!state.watch || typeof state.watch !== 'object') state.watch = {};
     if (!state.watchFlags || typeof state.watchFlags !== 'object') state.watchFlags = {};
     if (!Array.isArray(state.panes)) state.panes = [];
@@ -177,9 +179,11 @@
       $('#setTabProfile').classList.toggle('on', id === 'profile');
       $('#setTabNotify').classList.toggle('on', id === 'notify');
       $('#setTabBybit').classList.toggle('on', id === 'bybit');
+      $('#setTabChart').classList.toggle('on', id === 'chart');
       $('#setPanProfile').classList.toggle('hidden', id !== 'profile');
       $('#setPanNotify').classList.toggle('hidden', id !== 'notify');
       $('#setPanBybit').classList.toggle('hidden', id !== 'bybit');
+      $('#setPanChart').classList.toggle('hidden', id !== 'chart');
       say('');
     };
     const showBybitState = (j) => {
@@ -194,6 +198,24 @@
     $('#setTabProfile').onclick = () => tab('profile');
     $('#setTabNotify').onclick = () => tab('notify');
     $('#setTabBybit').onclick = () => tab('bybit');
+    $('#setTabChart').onclick = () => tab('chart');
+    const syncChartInputs = () => {
+      const o = state.chartOpts;
+      $('#setColUp').value = o.upColor || (state.theme === 'dark' ? '#26a69a' : '#16a085');
+      $('#setColDn').value = o.dnColor || (state.theme === 'dark' ? '#ef5350' : '#d9363e');
+      $('#setShowGrid').checked = o.showGrid !== false;
+      $('#setWatermark').checked = o.watermark !== false;
+      $('#setMagCross').checked = !!o.magnetCross;
+      $('#setQuickTrade').checked = !!o.showQuickTrade;
+    };
+    const applyChartOptsUi = () => { panes.forEach((p) => p.applyTheme()); save(); };
+    $('#setColUp').oninput = (e) => { state.chartOpts.upColor = e.target.value; applyChartOptsUi(); };
+    $('#setColDn').oninput = (e) => { state.chartOpts.dnColor = e.target.value; applyChartOptsUi(); };
+    $('#setShowGrid').onchange = (e) => { state.chartOpts.showGrid = e.target.checked; applyChartOptsUi(); };
+    $('#setWatermark').onchange = (e) => { state.chartOpts.watermark = e.target.checked; applyChartOptsUi(); };
+    $('#setMagCross').onchange = (e) => { state.chartOpts.magnetCross = e.target.checked; applyChartOptsUi(); };
+    $('#setQuickTrade').onchange = (e) => { state.chartOpts.showQuickTrade = e.target.checked; applyChartOptsUi(); };
+    $('#setChartReset').onclick = () => { state.chartOpts = { ...DEF_CHART_OPTS }; syncChartInputs(); applyChartOptsUi(); say('Вид графика сброшен', true); };
     $('#setTgToken').oninput = () => { tokEdited = true; $('#setTgTokState').textContent = ''; };
     $('#setTgProxy').oninput = () => { proxyEdited = true; $('#setTgProxyState').textContent = 'необязательно'; };
     $('#setBybitKey').oninput = () => { bkEdited = true; $('#setBybitKeyState').textContent = ''; };
@@ -215,6 +237,7 @@
       $('#setAva').textContent = (email[0] || '?').toUpperCase();
       tokEdited = false; proxyEdited = false; bkEdited = false; bsEdited = false;
       $('#setBybitResult').classList.add('hidden');
+      syncChartInputs();
       try {
         const j = await call('GET', 'notify');
         $('#setTgToken').value = '';
@@ -490,12 +513,24 @@
     }
     return out;
   }
-  const chartTheme = () => state.theme === 'dark'
-    ? { bg: '#0e1117', txt: '#d1d4dc', grid: '#1b2230', up: '#26a69a', dn: '#ef5350' }
-    : { bg: '#ffffff', txt: '#1b1f2a', grid: '#eceff4', up: '#16a085', dn: '#d9363e' };
+  const chartTheme = () => {
+    const base = state.theme === 'dark'
+      ? { bg: '#0e1117', txt: '#d1d4dc', grid: '#1b2230', up: '#26a69a', dn: '#ef5350' }
+      : { bg: '#ffffff', txt: '#1b1f2a', grid: '#eceff4', up: '#16a085', dn: '#d9363e' };
+    const o = state.chartOpts || {};
+    return {
+      bg: base.bg,
+      txt: base.txt,
+      grid: base.grid,
+      gridLine: o.showGrid === false ? 'transparent' : base.grid,
+      up: o.upColor || base.up,
+      dn: o.dnColor || base.dn,
+    };
+  };
 
   const chartMenuHooks = {
     addLevelAt: (p, price) => openAlertModal({ category: p.cfg.category, symbol: p.cfg.symbol, tf: p.cfg.tf, price }),
+    quickOrderAt: (p, side, price) => PMTTrade.quickOrderAt(p.cfg.category, p.cfg.symbol, side, price),
     goToDate: (p) => PMTUx.openGoToDate(p, state.tz),
     compare: (p) => openCompareFor(p),
   };
@@ -527,10 +562,14 @@
       this.ind = []; this.cmpSeries = []; this.subPovs = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null; this.replay = null;
       this.indHidden = false; this.legCollapsed = false; this.lastCrossTime = null;
       this.el = document.createElement('div'); this.el.className = 'pane';
-      this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div><div class="cnt hidden"></div>';
+      this.el.innerHTML = '<div class="cv"></div><div class="watermark"></div><div class="ohlc"></div><div class="load"></div><div class="cnt hidden"></div><div class="qtrade hidden"><button class="qt-sell" type="button">SELL</button><input class="qt-qty" type="number" step="any" min="0.0001" value="0.01"><button class="qt-buy" type="button">BUY</button></div>';
       host.appendChild(this.el);
-      this.cv = this.el.querySelector('.cv'); this.legend = this.el.querySelector('.ohlc'); this.loadEl = this.el.querySelector('.load');
-      this.cntEl = this.el.querySelector('.cnt');
+      this.cv = this.el.querySelector('.cv'); this.wmEl = this.el.querySelector('.watermark');
+      this.legend = this.el.querySelector('.ohlc'); this.loadEl = this.el.querySelector('.load');
+      this.cntEl = this.el.querySelector('.cnt'); this.qtEl = this.el.querySelector('.qtrade');
+      this.qtEl.addEventListener('mousedown', (e) => e.stopPropagation());
+      this.qtEl.querySelector('.qt-buy').onclick = () => PMTTrade.quickMarket(this.cfg.category, this.cfg.symbol, 'buy', parseFloat(this.qtEl.querySelector('.qt-qty').value));
+      this.qtEl.querySelector('.qt-sell').onclick = () => PMTTrade.quickMarket(this.cfg.category, this.cfg.symbol, 'sell', parseFloat(this.qtEl.querySelector('.qt-qty').value));
       buildTfbar(this);
       this.wireLegendEvents();
       this.el.addEventListener('contextmenu', (e) => {
@@ -610,16 +649,22 @@
       PMTUx.toast('Переход к ' + fmtTime(c[lo].time, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }), 'ok');
     }
     applyTheme() {
-      const t = chartTheme();
+      const t = chartTheme(), o = state.chartOpts || {};
       this.chart.applyOptions({
+        crosshair: { mode: o.magnetCross ? 1 : 0 },
         layout: { background: { color: t.bg }, textColor: t.txt },
-        grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
+        grid: { vertLines: { color: t.gridLine }, horzLines: { color: t.gridLine } },
         rightPriceScale: { borderColor: t.grid }, timeScale: { borderColor: t.grid },
         localization: { timeFormatter: (ts) => fmtTime(ts, { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) },
       });
       this.chart.timeScale().applyOptions({
         tickMarkFormatter: (ts, type) => type <= 1 ? fmtTime(ts, { month: 'short', year: type === 0 ? 'numeric' : undefined }) : type === 2 ? fmtTime(ts, { day: 'numeric', month: 'short' }) : fmtTime(ts, { hour: '2-digit', minute: '2-digit' }),
       });
+      if (this.wmEl) {
+        this.wmEl.classList.toggle('hidden', o.watermark === false);
+        this.wmEl.textContent = `${this.cfg.symbol} · ${this.tfLabel()}`;
+      }
+      if (this.qtEl) this.qtEl.classList.toggle('hidden', !o.showQuickTrade);
       if (this.main) this.buildSeries();
     }
     clearCompares() {
@@ -688,6 +733,7 @@
     }
     volData(c) { const t = chartTheme(); return c.map((k) => ({ time: k.time, value: k.volume, color: (k.close >= k.open ? t.up : t.dn) + '66' })); }
     render() {
+      if (this.wmEl) this.wmEl.textContent = `${this.cfg.symbol} · ${this.tfLabel()}`;
       if (this.cfg.type === 'baseline' && this.candles.length) {
         this.main.applyOptions({ baseValue: { type: 'price', price: this.candles[0].close } });
       }
@@ -1455,15 +1501,23 @@
     toolDone: () => setTool('cursor'),
     onSel: (dw) => { if (panes[active] && panes[active].dw === dw) { updateObjBar(); renderObjTree(); } },
     onServiceChange: (dw, o) => {
-      const p = panes.find((x) => x.dw === dw); if (!p) return;
-      if (o && o.id <= -1000) {
-        const aid = -1000 - o.id, price = +o.pts[0].p.toFixed(p.precision());
+      const p = panes.find((x) => x.dw === dw); if (!p || !o) return;
+      const price = +o.pts[0].p.toFixed(p.precision());
+      if (o.id <= -50000 || (o.id <= -20000 && o.id > -30000)) return;
+      if (o.id <= -30000 && o.id > -40000) { PMTTrade.dragSlTp(-30000 - o.id, 'sl', price); return; }
+      if (o.id <= -40000 && o.id > -50000) { PMTTrade.dragSlTp(-40000 - o.id, 'tp', price); return; }
+      if (o.id <= -1000 && o.id > -10000) {
+        const aid = -1000 - o.id;
         call('PUT', 'alerts/' + aid, null, { target_price: price }).then(() => { refreshAlerts(false); PMTUx.toast('Цена алерта обновлена: ' + price, 'ok'); }).catch(() => {});
       } else saveLevels(p);
     },
     onServiceRemove: (dw, o) => {
-      const p = panes.find((x) => x.dw === dw); if (!p) return;
-      if (o && o.id <= -1000) {
+      const p = panes.find((x) => x.dw === dw); if (!p || !o) return;
+      if (o.id <= -50000) { PMTTrade.cancelOrderById(-50000 - o.id); return; }
+      if (o.id <= -30000 && o.id > -40000) { PMTTrade.dragSlTp(-30000 - o.id, 'sl', null); return; }
+      if (o.id <= -40000 && o.id > -50000) { PMTTrade.dragSlTp(-40000 - o.id, 'tp', null); return; }
+      if (o.id <= -20000 && o.id > -30000) return;
+      if (o.id <= -1000 && o.id > -10000) {
         call('DELETE', 'alerts/' + (-1000 - o.id)).then(() => { refreshAlerts(false); PMTUx.toast('Алерт удалён'); }).catch(() => {});
       } else saveLevels(p);
     },
@@ -1643,6 +1697,14 @@ if showLabels and ta.crossover(close, ma)
 if showLabels and ta.crossunder(close, ma)
     label.new(bar_index, high, "DOWN", style=label.style_label_down, color=color.red, textcolor=color.white, yloc=yloc.abovebar)
 `;
+  const PINE_PRO_TEMPLATES = {
+    ema_cross: ['EMA Crossover Strategy', `//@version=5\nstrategy("EMA Crossover", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=50, commission_type=strategy.commission.percent, commission_value=0.055)\nfastLen = input.int(9, "Fast EMA", minval=1)\nslowLen = input.int(21, "Slow EMA", minval=2)\nf = ta.ema(close, fastLen)\ns = ta.ema(close, slowLen)\nplot(f, "Fast EMA", color=color.orange, linewidth=2)\nplot(s, "Slow EMA", color=color.blue, linewidth=2)\nif ta.crossover(f, s)\n    strategy.entry("Long", strategy.long)\nif ta.crossunder(f, s)\n    strategy.entry("Short", strategy.short)\n`],
+    rsi_trail: ['RSI Reversion + Trailing', `//@version=5\nstrategy("RSI Trailing", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=30)\nlen = input.int(14, "RSI Length")\nob = input.int(70, "Overbought")\nos = input.int(30, "Oversold")\ntp = input.int(300, "Trail activation (ticks)")\nto = input.int(120, "Trail offset (ticks)")\nr = ta.rsi(close, len)\nif ta.crossover(r, os)\n    strategy.entry("L", strategy.long)\nif ta.crossunder(r, ob)\n    strategy.entry("S", strategy.short)\nstrategy.exit("TrailL", "L", trail_points=tp, trail_offset=to, comment_trailing="Trail")\nstrategy.exit("TrailS", "S", trail_points=tp, trail_offset=to, comment_trailing="Trail")\n`],
+    supertrend_al: ['Supertrend + Alerts', `//@version=5\nindicator("Supertrend Pro", overlay=true)\nfactor = input.float(3.0, "Factor", step=0.1)\natrLen = input.int(10, "ATR Length")\n[st, dir] = ta.supertrend(factor, atrLen)\ncol = dir < 0 ? color.green : color.red\nplot(st, "Supertrend", color=col, linewidth=2)\nflipUp = dir < 0 and dir[1] > 0\nflipDn = dir > 0 and dir[1] < 0\nif flipUp\n    label.new(bar_index, low, "BUY", color=color.green, textcolor=color.white, yloc=yloc.belowbar)\n    alert("Supertrend BUY on " + syminfo.ticker, alert.freq_once_per_bar_close)\nif flipDn\n    label.new(bar_index, high, "SELL", color=color.red, textcolor=color.white, yloc=yloc.abovebar)\n    alert("Supertrend SELL on " + syminfo.ticker, alert.freq_once_per_bar_close)\n`],
+    bb_fill: ['Bollinger Bands + Fill', `//@version=5\nindicator("Bollinger Fill", overlay=true)\nlen = input.int(20, "Length")\nmult = input.float(2.0, "StdDev", step=0.1)\n[mid, upper, lower] = ta.bb(close, len, mult)\npu = plot(upper, "Upper", color=color.blue)\npm = plot(mid, "Basis", color=color.orange)\npl = plot(lower, "Lower", color=color.blue)\nfill(pu, pl, color=color.new(color.blue, 88))\n`],
+    macd_bar: ['MACD + Barcolor', `//@version=5\nindicator("MACD ColorBars", overlay=false)\n[m, sig, hist] = ta.macd(close, 12, 26, 9)\nhplot = plot(hist, "Hist", style=plot.style_columns, color=hist >= 0 ? color.green : color.red)\nplot(m, "MACD", color=color.blue)\nplot(sig, "Signal", color=color.orange)\nhline(0, "Zero", color=color.gray)\nbarcolor(hist >= 0 ? color.green : color.red)\n`],
+    pivot_brk: ['Pivot Breakout Strategy', `//@version=5\nstrategy("Pivot Breakout", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=40)\nleft = input.int(5, "Pivot Left")\nright = input.int(3, "Pivot Right")\nhi = ta.highest(high, left + right)\nlo = ta.lowest(low, left + right)\nplot(hi[1], "Res", color=color.red)\nplot(lo[1], "Sup", color=color.green)\nif close > hi[1]\n    strategy.entry("BrkL", strategy.long)\nif close < lo[1]\n    strategy.entry("BrkS", strategy.short)\n`],
+  };
   let mqlSel = null, mqlInfo = null, codeEd = null, conLogs = [];
   const mqlMsg = (t, bad) => { const el = $('#mqlMsg'); el.textContent = t || ''; el.className = bad ? 'dn' : 'up'; };
   const resizeCharts = () => panes.forEach((p) => p.chart.resize(p.cv.clientWidth, p.cv.clientHeight));
@@ -1737,6 +1799,12 @@ if showLabels and ta.crossunder(close, ma)
     };
     $('#mqlNew').onclick = async () => { try { const j = await call('POST', 'mql/scripts', null, { name: 'Новый индикатор', lang: 'mq5', source: MQL_TEMPLATE }); await mqlRefresh(j.id); } catch (x) { mqlMsg(x.message, true); } };
     $('#mqlNewPine').onclick = async () => { try { const j = await call('POST', 'mql/scripts', null, { name: 'Новый Pine', lang: 'pine', source: PINE_TEMPLATE }); await mqlRefresh(j.id); } catch (x) { mqlMsg(x.message, true); } };
+    $('#mqlTpl').onchange = async (e) => {
+      const k = e.target.value; e.target.value = '';
+      const tpl = PINE_PRO_TEMPLATES[k]; if (!tpl) return;
+      try { const j = await call('POST', 'mql/scripts', null, { name: tpl[0], lang: 'pine', source: tpl[1] }); await mqlRefresh(j.id); mqlMsg('Создан из шаблона: ' + tpl[0]); }
+      catch (x) { mqlMsg(x.message, true); }
+    };
     $('#mqlSave').onclick = async () => {
       try {
         await call('PUT', 'mql/scripts/' + mqlSel.id, null, { source: codeEd.value, name: $('#mqlName').value });
@@ -1824,7 +1892,40 @@ if showLabels and ta.crossunder(close, ma)
       + `<tr><td>CAGR / Recovery</td><td colspan="3">${m.cagr === null ? '—' : nf(m.cagr, 1) + '%'} / ${m.recoveryFactor === null ? '—' : nf(m.recoveryFactor, 2)}</td></tr>`
       + `<tr><td>Макс. просадка / Run-up</td><td colspan="3"><span class="dn">${nf(m.maxDrawdownPct)}%</span> (${nf(m.maxDrawdown)}) / <span class="up">${nf(m.maxRunUpPct)}%</span> (${nf(m.maxRunUp)})</td></tr>`
       + `<tr><td>Экспозиция / Комиссии / Buy&amp;Hold</td><td colspan="3">${nf(m.exposurePct, 1)}% · ${nf(m.commissionPaid)} · ${nf(m.buyHoldPct)}%</td></tr>`
-      + '</tbody></table>';
+      + '</tbody></table>' + buildMonthlyReturnsHtml(r.equity);
+  }
+  function buildMonthlyReturnsHtml(eq) {
+    if (!Array.isArray(eq) || eq.length < 2) return '';
+    const byYm = new Map();
+    for (const [ts, val] of eq) {
+      const d = new Date(ts * 1000), ym = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      if (!byYm.has(ym)) byYm.set(ym, { first: val, last: val });
+      else byYm.get(ym).last = val;
+    }
+    const years = {};
+    let prevEnd = eq[0][1];
+    for (const [ym, rng] of [...byYm.entries()].sort()) {
+      const [y, mo] = ym.split('-'), base = prevEnd || rng.first || 1;
+      const pct = ((rng.last - base) / base) * 100;
+      (years[y] = years[y] || {})[+mo] = pct;
+      years[y].end = rng.last;
+      if (years[y].start === undefined) years[y].start = base;
+      prevEnd = rng.last;
+    }
+    const MON = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+    let h = '<div class="ot-sec" style="margin-top:10px">Доходность по месяцам (%)</div><table class="mret-tbl"><thead><tr><th>Год</th>'
+      + MON.map((m) => `<th>${m}</th>`).join('') + '<th>Год %</th></tr></thead><tbody>';
+    for (const y of Object.keys(years).sort()) {
+      const row = years[y];
+      h += `<tr><td><b>${y}</b></td>`;
+      for (let m = 1; m <= 12; m++) {
+        const v = row[m];
+        h += v === undefined ? '<td>—</td>' : `<td class="${v >= 0 ? 'mret-pos' : 'mret-neg'}">${v >= 0 ? '+' : ''}${v.toFixed(1)}%</td>`;
+      }
+      const yp = row.start ? ((row.end - row.start) / row.start) * 100 : 0;
+      h += `<td class="${yp >= 0 ? 'mret-pos' : 'mret-neg'}"><b>${yp >= 0 ? '+' : ''}${yp.toFixed(1)}%</b></td></tr>`;
+    }
+    return h + '</tbody></table>';
   }
   function tShowResult(r) {
     tLast = r; const m = r.metrics, cls = (v) => (v >= 0 ? 'up' : 'dn');
@@ -2112,6 +2213,7 @@ if showLabels and ta.crossunder(close, ma)
     });
     PMTUx.wireKeyboard({
       openSearch: (q) => openSymbolPicker(q),
+      setTf: (tf) => applyToPanes({ tf }),
       resetView: () => panes[active] && panes[active].resetView(),
       goToDate: () => panes[active] && PMTUx.openGoToDate(panes[active], state.tz),
       screenshot: () => panes[active] && PMTUx.takeScreenshot(panes[active]),
@@ -2127,6 +2229,7 @@ if showLabels and ta.crossunder(close, ma)
         setTool('cursor');
       },
     });
+    $('#btnHelp').onclick = () => PMTUx.openHotkeysHelp();
     wireIndicators(); wireTools(); wireMql(); wireTester(); wireSettings(); wireAlerts();
     PMTTrade.wireReplay({
       getPane: () => panes[active],
@@ -2306,8 +2409,8 @@ if showLabels and ta.crossunder(close, ma)
     $('#category').value = first.category;
     loadSymbols(first.category).catch(() => {}).finally(() => {
       ensureLayout(); refreshAlerts(true); pollTickers();
-      setInterval(pollTickers, 5000);
-      setInterval(pollAlertLogs, 6000);
+      setInterval(pollTickers, 15000);
+      setInterval(pollAlertLogs, 12000);
       setInterval(() => panes.forEach((p) => p.tickCountdown()), 1000);
       window.addEventListener('beforeunload', save);
     });

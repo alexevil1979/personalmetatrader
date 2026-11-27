@@ -240,7 +240,13 @@
     const mi = (a, label, key = '') => `<div class="mi" data-a="${a}"><span>${label}</span>${key ? `<small>${key}</small>` : ''}</div>`;
     const m = document.createElement('div');
     m.className = 'ctxmenu';
-    m.innerHTML = (pStr ? mi('alert', `Добавить алерт на ${pStr}`, 'Alt+A') + mi('copy', `Копировать цену ${pStr}`) + '<div class="msep"></div>' : '')
+    m.innerHTML = (pStr
+      ? mi('alert', `Добавить алерт на ${pStr}`, 'Alt+A')
+        + mi('qbuy', `Купить Limit/Stop на ${pStr}`)
+        + mi('qsell', `Продать Limit/Stop на ${pStr}`)
+        + mi('copy', `Копировать цену ${pStr}`)
+        + '<div class="msep"></div>'
+      : '')
       + mi('reset', 'Сбросить вид графика', 'Alt+R')
       + mi('goto', 'Перейти к дате…', 'Alt+G')
       + mi('compare', 'Сравнить символ…')
@@ -257,6 +263,7 @@
       const a = b.dataset.a;
       hideChartMenu();
       if (a === 'alert' && price !== null) hooks.addLevelAt(pane, +price.toFixed(pane.precision()));
+      else if ((a === 'qbuy' || a === 'qsell') && price !== null && hooks.quickOrderAt) hooks.quickOrderAt(pane, a === 'qbuy' ? 'buy' : 'sell', +price.toFixed(pane.precision()));
       else if (a === 'copy' && pStr) {
         try { await navigator.clipboard.writeText(pStr); toast('Цена скопирована: ' + pStr, 'ok'); }
         catch { toast('Цена: ' + pStr); }
@@ -338,6 +345,63 @@
     }
   }
 
+  // ---------- Quick Interval Typing & Hotkeys Cheatsheet ----------
+  const TF_ALIASES = {
+    '1': ['1', 'M1 (1 мин)'], '1m': ['1', 'M1 (1 мин)'],
+    '3': ['3', 'M3 (3 мин)'], '3m': ['3', 'M3 (3 мин)'],
+    '5': ['5', 'M5 (5 мин)'], '5m': ['5', 'M5 (5 мин)'],
+    '15': ['15', 'M15 (15 мин)'], '15m': ['15', 'M15 (15 мин)'],
+    '30': ['30', 'M30 (30 мин)'], '30m': ['30', 'M30 (30 мин)'],
+    '60': ['60', 'H1 (1 час)'], '1h': ['60', 'H1 (1 час)'], 'h1': ['60', 'H1 (1 час)'],
+    '120': ['120', 'H2 (2 часа)'], '2h': ['120', 'H2 (2 часа)'], 'h2': ['120', 'H2 (2 часа)'],
+    '240': ['240', 'H4 (4 часа)'], '4h': ['240', 'H4 (4 часа)'], 'h4': ['240', 'H4 (4 часа)'],
+    'd': ['D', 'D1 (1 день)'], '1d': ['D', 'D1 (1 день)'], 'd1': ['D', 'D1 (1 день)'],
+    'w': ['W', 'W1 (1 неделя)'], '1w': ['W', 'W1 (1 неделя)'], 'w1': ['W', 'W1 (1 неделя)'],
+    'mn': ['M', 'MN (1 месяц)'], 'mo': ['M', 'MN (1 месяц)'], '1mo': ['M', 'MN (1 месяц)'],
+  };
+  let tfqCb = null, tfqWired = false;
+  function openQuickTf(initialDigit, onPick) {
+    tfqCb = onPick;
+    const dlg = $('#tfQuickDlg'), inp = $('#tfQuickIn'), lbl = $('#tfQuickMatch');
+    if (!dlg || !inp) return;
+    const resolve = () => TF_ALIASES[inp.value.trim().toLowerCase()] || null;
+    const showMatch = () => {
+      const m = resolve();
+      lbl.textContent = m ? m[1] : 'Варианты: 1, 5, 15, 30, 60 (1h), 240 (4h), 1d, 1w, 1mo';
+      lbl.className = m ? 'up' : 'dn';
+    };
+    if (!tfqWired) {
+      tfqWired = true;
+      dlg.onmousedown = (e) => { if (e.target === dlg) dlg.classList.add('hidden'); };
+      inp.oninput = showMatch;
+      inp.onkeydown = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); dlg.classList.add('hidden'); }
+        else if (e.key === 'Enter') {
+          e.preventDefault();
+          const m = resolve();
+          if (m && tfqCb) tfqCb(m[0]);
+          dlg.classList.add('hidden');
+        }
+      };
+    }
+    inp.value = initialDigit || '';
+    dlg.classList.remove('hidden');
+    showMatch();
+    inp.focus();
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  }
+  let helpWired = false;
+  function openHotkeysHelp() {
+    const dlg = $('#helpDlg');
+    if (!dlg) return;
+    if (!helpWired) {
+      helpWired = true;
+      $('#helpClose').onclick = () => dlg.classList.add('hidden');
+      dlg.onmousedown = (e) => { if (e.target === dlg) dlg.classList.add('hidden'); };
+    }
+    dlg.classList.remove('hidden');
+  }
+
   // ---------- Global Keyboard Shortcuts ----------
   function wireKeyboard(hooks) {
     window.addEventListener('keydown', (e) => {
@@ -370,6 +434,12 @@
       if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault(); hooks.openSearch(''); return;
       }
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault(); openHotkeysHelp(); return;
+      }
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9]$/.test(e.key)) {
+        e.preventDefault(); openQuickTf(e.key, hooks.setTf); return;
+      }
       if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[a-zA-Z]$/.test(e.key)) {
         e.preventDefault(); hooks.openSearch(e.key.toUpperCase()); return;
       }
@@ -387,5 +457,5 @@
     });
   }
 
-  window.PMTUx = { toast, Ruler, wireSymbolSearch, openSymbolSearch, openGoToDate, showChartMenu, showDrawingMenu, hideChartMenu, takeScreenshot, wireKeyboard };
+  window.PMTUx = { toast, Ruler, wireSymbolSearch, openSymbolSearch, openGoToDate, showChartMenu, showDrawingMenu, hideChartMenu, takeScreenshot, openQuickTf, openHotkeysHelp, wireKeyboard };
 })();

@@ -76,6 +76,7 @@
   <button id="btnAlert" title="Создать алерт (Alt+A)">🔔 Алерт</button>
   <button id="btnLevels" title="Поставить два уровня уведомлений: выше и ниже текущей цены (±1%)">⇕ Уровни</button>
   <button id="btnSettings" title="Настройки: профиль и уведомления">⚙ Настройки</button>
+  <button id="btnHelp" title="Горячие клавиши (?)">?</button>
   <button id="togWatch" class="on" title="Обзор рынка">Обзор</button>
   <button id="togInfo" class="on" title="Нижняя панель">Инфо</button>
   <button id="togLegend" class="on" title="Легенда на графиках: символ, OHLC, названия индикаторов">Легенда</button>
@@ -163,6 +164,15 @@
             <input type="file" id="mqlFile" accept=".mq4,.mq5,.ex4,.ex5,.pine">
             <button id="mqlNew">Новый MQL5</button>
             <button id="mqlNewPine">Новый Pine</button>
+            <select id="mqlTpl" title="Готовые шаблоны Pine v5">
+              <option value="">— Шаблон Pine —</option>
+              <option value="ema_cross">EMA Crossover (Strategy)</option>
+              <option value="rsi_trail">RSI Reversion + Trailing</option>
+              <option value="supertrend_al">Supertrend + Alerts</option>
+              <option value="bb_fill">Bollinger Bands + Fill</option>
+              <option value="macd_bar">MACD + Barcolor</option>
+              <option value="pivot_brk">Pivot Breakout (Strategy)</option>
+            </select>
           </div>
           <div class="mqlcols">
             <div id="mqlList"></div>
@@ -342,6 +352,7 @@
     <button id="setTabProfile" class="settab on">Профиль</button>
     <button id="setTabNotify" class="settab">Уведомления</button>
     <button id="setTabBybit" class="settab">Bybit API</button>
+    <button id="setTabChart" class="settab">График</button>
   </div>
   <div id="setPanProfile" class="setpan">
     <div class="setacct"><div class="setava" id="setAva">A</div><div><div class="setemail" id="setEmail"></div><div class="setsub">Ваша учётная запись</div></div></div>
@@ -371,6 +382,17 @@
     <label class="chk"><input type="checkbox" id="setBybitTestnet"> Testnet (api-testnet.bybit.com)</label>
     <div class="setbtns"><button id="setBybitSave" class="btnpri" type="button">Сохранить</button><button id="setBybitTest" class="btnsec" type="button">Проверить портфель</button><button id="setBybitDel" class="btnsec" type="button">Удалить</button></div>
     <div id="setBybitResult" class="setnote hidden"></div>
+  </div>
+  <div id="setPanChart" class="setpan hidden">
+    <div class="al-grid2">
+      <label class="setlab">Цвет бычьих свечей <input type="color" id="setColUp" value="#26a69a"></label>
+      <label class="setlab">Цвет медвежьих свечей <input type="color" id="setColDn" value="#ef5350"></label>
+    </div>
+    <label class="chk"><input type="checkbox" id="setShowGrid" checked> Сетка на графике</label>
+    <label class="chk"><input type="checkbox" id="setWatermark" checked> Водяной знак (символ + ТФ)</label>
+    <label class="chk"><input type="checkbox" id="setMagCross"> Магнит перекрестия (к OHLC свечи)</label>
+    <label class="chk"><input type="checkbox" id="setQuickTrade"> Панель торговли в один клик (Buy/Sell на графике)</label>
+    <div class="setbtns"><button id="setChartReset" class="btnsec" type="button">Сбросить вид по умолчанию</button></div>
   </div>
   <div id="setMsg"></div>
 </div></div>
@@ -447,6 +469,32 @@
       </tr></thead>
       <tbody id="scrBody"></tbody>
     </table>
+  </div>
+</div></div>
+
+<div id="tfQuickDlg" class="dlg hidden"><div class="dlgbox gotobox">
+  <div class="sethead"><div class="settitle">⏱ Быстрый таймфрейм</div></div>
+  <div class="setpan">
+    <input id="tfQuickIn" placeholder="1, 5, 15, 60 (1h), 240 (4h), 1d, 1w…" autocomplete="off">
+    <div id="tfQuickMatch" style="font-size:11px;padding-bottom:6px"></div>
+  </div>
+</div></div>
+
+<div id="helpDlg" class="dlg hidden"><div class="dlgbox" style="width:min(520px,94vw)">
+  <div class="dlghead"><b>⌨ Горячие клавиши</b><button id="helpClose">✕</button></div>
+  <div class="hk-grid">
+    <div><kbd>Ctrl+K</kbd> / <kbd>/</kbd> / <b>A–Z</b></div><div>Поиск символа</div>
+    <div><b>0–9</b></div><div>Быстрый ввод таймфрейма (1, 15, 60, 4h, 1d…)</div>
+    <div><kbd>Alt+A</kbd></div><div>Создать алерт</div>
+    <div><kbd>Alt+G</kbd></div><div>Перейти к дате / времени</div>
+    <div><kbd>Alt+R</kbd></div><div>Сбросить масштаб графика</div>
+    <div><kbd>Alt+S</kbd></div><div>Скриншот графика (PNG)</div>
+    <div><kbd>Alt+M</kbd> / <b>Shift+Drag</b></div><div>Линейка измерений</div>
+    <div><kbd>Alt+H</kbd> / <kbd>Alt+T</kbd> / <kbd>Alt+F</kbd></div><div>Горизонталь / Тренд / Фибоначчи</div>
+    <div><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd></div><div>Отменить / Повторить рисунок</div>
+    <div><kbd>Ctrl+D</kbd> / <kbd>Del</kbd></div><div>Клонировать / Удалить объект</div>
+    <div><b>ПКМ на графике</b></div><div>Лимитный/стоп ордер, алерт, настройки</div>
+    <div><b>?</b> / <kbd>Esc</kbd></div><div>Эта справка / Закрыть окно</div>
   </div>
 </div></div>
 
