@@ -5,9 +5,9 @@
  * geom() is pure (given a coordinate env) so it is used for drawing and for hit-testing.
  */
 (() => {
-  const NEED = { hline: 1, vline: 1, trend: 2, ray: 2, channel: 3, rect: 2, fibret: 2, fibext: 3, fibfan: 2, fibtime: 2, pitchfork: 3, text: 1, arrow: 2, pricelabel: 1, pencil: 2 };
-  const NAMES = { hline: 'Горизонтальная линия', vline: 'Вертикальная линия', trend: 'Трендовая линия', ray: 'Луч', channel: 'Канал', rect: 'Прямоугольник', fibret: 'Fibonacci Retracement', fibext: 'Fibonacci Extension', fibfan: 'Fibonacci Fan', fibtime: 'Fibonacci Time Zones', pitchfork: 'Вилы Эндрюса', text: 'Текст', arrow: 'Стрелка', pricelabel: 'Ценовая метка', pencil: 'Карандаш — свободная линия' };
-  const DEF_COLOR = { fibret: '#ff9800', fibext: '#ff9800', fibfan: '#ff9800', fibtime: '#ff9800', pitchfork: '#e91e63', channel: '#2962ff', rect: '#2962ff', arrow: '#ffeb3b', text: '#d1d4dc', pricelabel: '#26a69a', pencil: '#26a69a' };
+  const NEED = { hline: 1, vline: 1, trend: 2, ray: 2, channel: 3, rect: 2, fibret: 2, fibext: 3, fibfan: 2, fibtime: 2, pitchfork: 3, text: 1, arrow: 2, pricelabel: 1, pencil: 2, levelup: 1, leveldn: 1 };
+  const NAMES = { hline: 'Горизонтальная линия', vline: 'Вертикальная линия', trend: 'Трендовая линия', ray: 'Луч', channel: 'Канал', rect: 'Прямоугольник', fibret: 'Fibonacci Retracement', fibext: 'Fibonacci Extension', fibfan: 'Fibonacci Fan', fibtime: 'Fibonacci Time Zones', pitchfork: 'Вилы Эндрюса', text: 'Текст', arrow: 'Стрелка', pricelabel: 'Ценовая метка', pencil: 'Карандаш — свободная линия', levelup: 'Верхний уровень (уведомление)', leveldn: 'Нижний уровень (уведомление)' };
+  const DEF_COLOR = { fibret: '#ff9800', fibext: '#ff9800', fibfan: '#ff9800', fibtime: '#ff9800', pitchfork: '#e91e63', channel: '#2962ff', rect: '#2962ff', arrow: '#ffeb3b', text: '#d1d4dc', pricelabel: '#26a69a', pencil: '#26a69a', levelup: '#ef5350', leveldn: '#26a69a' };
   const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
   const colorOf = (o) => o.style.color || DEF_COLOR[o.type] || '#2962ff';
 
@@ -19,7 +19,9 @@
     if (P.some((q) => q.x === null || q.y === null || Number.isNaN(q.x) || Number.isNaN(q.y))) return null;
     const [a, b, c] = P, { W, H } = E, L = [], F = [], T = [];
     switch (o.type) {
-      case 'hline': L.push(seg({ x: 0, y: a.y }, { x: W, y: a.y })); T.push({ x: W - 4, y: a.y - 3, s: o.pts[0].p.toFixed(E.prec), align: 'right' }); break;
+      case 'hline': L.push(seg({ x: 0, y: a.y }, { x: W, y: a.y })); T.push({ x: W - 4, y: a.y - 3, s: (o.style.text ? o.style.text + ' ' : '') + o.pts[0].p.toFixed(E.prec), align: 'right' }); break;
+      case 'levelup':
+      case 'leveldn': L.push(seg({ x: 0, y: a.y }, { x: W, y: a.y })); T.push({ x: W - 4, y: a.y - 3, s: (o.style.text ? o.style.text + ' ' : '') + o.pts[0].p.toFixed(E.prec), align: 'right' }); break;
       case 'vline': L.push(seg({ x: a.x, y: 0 }, { x: a.x, y: H })); break;
       case 'trend': L.push(seg(a, b)); break;
       case 'ray': L.push(seg(a, far(a, b, W, H))); break;
@@ -88,7 +90,7 @@
 
   class Drawings {
     constructor(pane, hooks) {
-      this.pane = pane; this.hooks = hooks; this.key = null; this.sel = null; this.creating = null; this.hover = null; this.drag = null; this.series = null;
+      this.pane = pane; this.hooks = hooks; this.key = null; this.sel = null; this.creating = null; this.hover = null; this.drag = null; this.series = null; this.service = [];
       const self = this;
       this.prim = {
         attached(p) { self.reqUpd = p.requestUpdate; }, detached() {}, updateAllViews() {},
@@ -102,6 +104,9 @@
       window.addEventListener('mouseup', this.onWinUp = () => this.up());
     }
     get objs() { return this.key ? loadKey(this.key) : []; }
+    // service objects (alert levels) render and drag like drawings but live in their own storage
+    setService(list) { this.service = list || []; if (this.sel !== null && !this.all().find((o) => o.id === this.sel)) this.sel = null; this.request(); }
+    all() { return this.key ? loadKey(this.key).concat(this.service) : this.service.slice(); }
     setKey(key) {
       this.key = key; this.sel = null; this.creating = null; this.hooks.onSel(this); this.request();
       if (window.PMTSync) PMTSync.fetchObj(key, (list) => { const a = loadKey(key); a.length = 0; list.forEach((o) => a.push(o)); cache(key); this.request(); }, loadKey(key).slice());
@@ -149,7 +154,7 @@
       this.size = { W: size.width - 0, H: size.height };
       try { const ps = this.pane.chart.paneSize(); this.size = { W: ps.width, H: ps.height }; } catch { /* old api */ }
       const E = this.env(), dark = document.body.className !== 'light';
-      const list = this.objs.slice(); if (this.creating) list.push(this.previewObj());
+      const list = this.all(); if (this.creating) list.push(this.previewObj());
       ctx.save(); ctx.font = '11px sans-serif';
       for (const o of list) {
         const g = geom(o, E); if (!g) continue;
@@ -180,10 +185,10 @@
     // --- interaction ---
     hit(e) {
       const r = this.pane.cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, E = this.env();
-      const cur = this.objs.find((o) => o.id === this.sel), out = {};
+      const cur = this.all().find((o) => o.id === this.sel), out = {};
       if (cur) { const g = geom(cur, E); if (g) { const i = g.P.findIndex((p) => Math.hypot(p.x - x, p.y - y) <= 8); if (i >= 0) return { o: cur, handle: i }; } }
       let best = null, bd = 7;
-      for (const o of this.objs) { const g = geom(o, E); if (!g) continue; for (const l of g.L) { const d = distSeg(x, y, l.a, l.b); if (d < bd) { bd = d; best = o; } } }
+      for (const o of this.all()) { const g = geom(o, E); if (!g) continue; for (const l of g.L) { const d = distSeg(x, y, l.a, l.b); if (d < bd) { bd = d; best = o; } } }
       return best ? { o: best, handle: -1 } : out.none;
     }
     down(e) {
@@ -238,15 +243,19 @@
     }
     up() {
       if (this.creating && this.creating.type === 'pencil') { if (this.creating.pts.length >= 2) this.finish(); else { this.creating = null; this.request(); } return; }
-      if (this.drag) { if (this.drag.moved) persist(this.key); this.drag = null; }
+      if (this.drag) { if (this.drag.moved) { if (this.drag.o.id < 0) { if (this.hooks.onServiceChange) this.hooks.onServiceChange(this, this.drag.o); } else persist(this.key); } this.drag = null; }
     }
     dbl(e) {
       if (!this.inside(e)) return; const h = this.hit(e);
       if (h && h.o.type === 'text') { e.stopPropagation(); const s = prompt('Текст', h.o.style.text); if (s) { h.o.style.text = s; persist(this.key); } }
     }
     cancel() { if (this.creating) { this.creating = null; this.hooks.toolDone(); this.request(); } else if (this.sel !== null) { this.sel = null; this.hooks.onSel(this); } }
-    selected() { return this.objs.find((o) => o.id === this.sel) || null; }
-    remove() { const o = this.selected(); if (!o) return; const a = this.objs; a.splice(a.indexOf(o), 1); this.sel = null; persist(this.key); this.hooks.onSel(this); this.request(); }
+    selected() { return this.all().find((o) => o.id === this.sel) || null; }
+    remove() {
+      const o = this.selected(); if (!o) return;
+      if (o.id < 0) { this.service.splice(this.service.indexOf(o), 1); this.sel = null; if (this.hooks.onServiceRemove) this.hooks.onServiceRemove(this, o); this.hooks.onSel(this); this.request(); return; }
+      const a = this.objs; a.splice(a.indexOf(o), 1); this.sel = null; persist(this.key); this.hooks.onSel(this); this.request();
+    }
     clearAll() { this.objs.length = 0; this.sel = null; persist(this.key); this.hooks.onSel(this); this.request(); }
     save() { persist(this.key); }
   }

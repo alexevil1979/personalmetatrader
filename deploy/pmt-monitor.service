@@ -1,0 +1,15 @@
+[Unit]
+Description=PersonalMetaTrader alert-level monitor (Telegram notifications)
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+User=pmt
+Group=pmt
+WorkingDirectory=/ssd/www/personalmetatrader
+ExecStart=/usr/bin/php /ssd/www/personalmetatrader/bin/monitor.php
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

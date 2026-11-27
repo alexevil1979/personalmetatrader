@@ -243,3 +243,38 @@ CREATE TABLE IF NOT EXISTS system_logs (
 
 -- migration: Pine Script support (idempotent)
 ALTER TABLE custom_scripts MODIFY lang ENUM('mq4','mq5','ex4','ex5','js','pine') NOT NULL;
+
+-- Long-lived "remember me" tokens: one row per device, independent of PHP sessions (30 days).
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  selector CHAR(24) NOT NULL UNIQUE,
+  token_hash CHAR(64) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used_at DATETIME NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  KEY ix_tokens_user (user_id)
+) ENGINE=InnoDB;
+
+-- Per-user notification settings (Telegram bot chat; more channels later).
+CREATE TABLE IF NOT EXISTS user_notify (
+  user_id INT UNSIGNED PRIMARY KEY,
+  telegram_chat VARCHAR(64) NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Alert levels: one pair per user+market+symbol, monitored server-side even with the browser closed.
+CREATE TABLE IF NOT EXISTS price_levels (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  category VARCHAR(16) NOT NULL,
+  symbol VARCHAR(32) NOT NULL,
+  upper_price DOUBLE NULL,
+  lower_price DOUBLE NULL,
+  zone ENUM('inside','above','below') NOT NULL DEFAULT 'inside',
+  notified_at DATETIME NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_levels (user_id, category, symbol),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

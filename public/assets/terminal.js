@@ -19,12 +19,22 @@
   let active = 0;
 
   let csrf = '', authed = false;
-  async function call(method, path, params, body) {
+  async function call(method, path, params, body, retried) {
     const opt = { method, headers: { 'X-CSRF-Token': csrf }, credentials: 'same-origin' };
     if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
     const r = await fetch('/api/' + path + (params ? '?' + new URLSearchParams(params) : ''), opt);
     const j = await r.json().catch(() => ({}));
-    if (r.status === 401 && !path.startsWith('auth/')) { authed = false; showAuth('login'); throw new Error('unauthorized'); }
+    // the session may be re-created server-side (remember-me) or the csrf rotated by a login in another tab:
+    // silently refresh and retry once instead of showing the login dialog
+    if ((r.status === 401 && !path.startsWith('auth/')) || (r.status === 403 && j.error === 'csrf')) {
+      if (!retried && !path.startsWith('auth/')) {
+        try {
+          const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((x) => x.json());
+          if (me.user) { csrf = me.csrf; authed = true; return call(method, path, params, body, true); }
+        } catch { /* fall through */ }
+      }
+      if (r.status === 401) { authed = false; showAuth('login'); throw new Error('unauthorized'); }
+    }
     if (!r.ok) throw new Error(j.error || r.status);
     return j;
   }
@@ -115,6 +125,28 @@
     return symbolsByCat[cat];
   }
   const symInfo = (cat, sym) => (symbolsByCat[cat] || []).find((s) => s.symbol === sym);
+
+  // ---------- alert levels (server-monitored, Telegram notify on breakout) ----------
+  const LVL_UP = -101, LVL_DN = -102;
+  async function loadLevels(p) {
+    const cat = p.cfg.category, sym = p.cfg.symbol;
+    try {
+      const j = await call('GET', 'levels', { category: cat, symbol: sym });
+      if (!panes.includes(p) || p.cfg.category !== cat || p.cfg.symbol !== sym) return;
+      applyLevels(p, j.levels);
+    } catch { /* offline */ }
+  }
+  function applyLevels(p, lv) {
+    const t = p.candles.length ? p.candles[p.candles.length - 1].time : Math.floor(Date.now() / 1000);
+    const sv = [];
+    if (lv && lv.upper !== null && lv.upper !== undefined) sv.push({ id: LVL_UP, type: 'levelup', pts: [{ t, p: lv.upper }], style: { text: '⇑' } });
+    if (lv && lv.lower !== null && lv.lower !== undefined) sv.push({ id: LVL_DN, type: 'leveldn', pts: [{ t, p: lv.lower }], style: { text: '⇓' } });
+    p.dw.setService(sv);
+  }
+  function saveLevels(p) {
+    const up = p.dw.service.find((x) => x.id === LVL_UP), lo = p.dw.service.find((x) => x.id === LVL_DN);
+    return call('PUT', 'levels', { category: p.cfg.category, symbol: p.cfg.symbol }, { upper: up ? up.pts[0].p : null, lower: lo ? lo.pts[0].p : null }).catch(() => {});
+  }
 
   // ---------- WebSocket hub: one shared connection per category ----------
   class WsHub {
@@ -233,6 +265,7 @@
     render() { this.main.setData(this.series(this.candles)); this.vol.setData(this.volData(this.candles)); this.refreshIndicators(true); }
     async load() {
       this.unsubscribe(); this.dw.setKey(this.cfg.category + ':' + this.cfg.symbol); this.candles = []; this.exhausted = false; this.loadEl.textContent = 'загрузка…';
+      loadLevels(this);
       const token = this.token = (this.token || 0) + 1;
       try {
         const d = await api('candles', { category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, limit: PAGE });
@@ -510,6 +543,8 @@
     activate: (p) => { const i = panes.indexOf(p); if (i >= 0 && i !== active) setActive(i); },
     toolDone: () => setTool('cursor'),
     onSel: (dw) => { if (panes[active] && panes[active].dw === dw) updateObjBar(); },
+    onServiceChange: (dw) => { const p = panes.find((x) => x.dw === dw); if (p) saveLevels(p); },
+    onServiceRemove: (dw) => { const p = panes.find((x) => x.dw === dw); if (p) saveLevels(p); },
   };
   function setTool(t) {
     tool = t; document.querySelectorAll('#tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
@@ -805,6 +840,14 @@ if showLabels and ta.crossunder(close, ma)
       applyToPanes({ symbol: s }); pollTickers();
     };
     $('#syncAll').checked = state.sync; $('#syncAll').onchange = (e) => { state.sync = e.target.checked; save(); };
+    $('#btnLevels').onclick = async () => {
+      const p = panes[active], c = p.cfg;
+      const t = tickers[c.symbol] ? parseFloat(tickers[c.symbol].last) : (p.candles.length ? p.candles[p.candles.length - 1].close : 0);
+      if (!t) return;
+      const prec = p.precision(), up = +(t * 1.01).toFixed(prec), lo = +(t * 0.99).toFixed(prec);
+      await saveLevels({ cfg: c, dw: { service: [{ id: LVL_UP, pts: [{ p: up }] }, { id: LVL_DN, pts: [{ p: lo }] }] } }).catch(() => {});
+      applyLevels(p, { upper: up, lower: lo });
+    };
     $('#tz').value = state.tz; $('#tz').onchange = (e) => { state.tz = e.target.value; panes.forEach((p) => p.applyTheme()); save(); };
     $('#theme').value = state.theme; $('#theme').onchange = (e) => { state.theme = e.target.value; document.body.classList.toggle('light', state.theme === 'light'); panes.forEach((p) => p.applyTheme()); save(); };
     document.body.classList.toggle('light', state.theme === 'light');

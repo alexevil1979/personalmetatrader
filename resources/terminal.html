@@ -39,6 +39,7 @@
   <button id="btnTest" title="Тестер стратегий (Pine strategy)">Тестер</button>
   <button id="btnMql" title="Скрипты и индикаторы MQL4/MQL5">MQL</button>
   <button id="btnInd" title="Индикаторы">ƒ Индикаторы</button>
+  <button id="btnLevels" title="Поставить два уровня уведомлений: выше и ниже текущей цены (±1%)">⇕ Уровни</button>
   <button id="togWatch" class="on" title="Обзор рынка">Обзор</button>
   <button id="togInfo" class="on" title="Нижняя панель">Инфо</button>
   <span id="userBox" class="hidden"><span id="userEmail"></span> <button id="btnLogout" title="Выйти">Выйти</button></span>
@@ -100,7 +101,7 @@
     </div></div>
 </div></div>
 
-<div id="authDlg" class="dlg"><div class="dlgbox authbox">
+<div id="authDlg" class="dlg hidden"><div class="dlgbox authbox">
   <div class="dlghead"><b id="authTitle">Вход</b></div>
   <input id="authEmail" type="email" placeholder="Email" autocomplete="username">
   <input id="authPass" type="password" placeholder="Пароль" autocomplete="current-password">

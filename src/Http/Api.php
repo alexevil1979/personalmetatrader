@@ -240,6 +240,28 @@ final class Api
             return;
         }
         switch ($path) {
+            case '/api/levels': {
+                $cat = Market::checkCategory($_GET['category'] ?? 'linear');
+                $sym = Market::checkSymbol($_GET['symbol'] ?? '');
+                if ($method === 'PUT') {
+                    $b = self::body(2000);
+                    $up = isset($b['upper']) && is_numeric($b['upper']) ? (float) $b['upper'] : null;
+                    $lo = isset($b['lower']) && is_numeric($b['lower']) ? (float) $b['lower'] : null;
+                    if ($up === null && $lo === null) {
+                        $pdo->prepare('DELETE FROM price_levels WHERE user_id=? AND category=? AND symbol=?')->execute([$uid, $cat, $sym]);
+                    } else {
+                        // zone resets: the monitor re-arms after the levels are moved or re-set
+                        $pdo->prepare('INSERT INTO price_levels (user_id, category, symbol, upper_price, lower_price, zone) VALUES (?,?,?,?,?, "inside") ON DUPLICATE KEY UPDATE upper_price=VALUES(upper_price), lower_price=VALUES(lower_price), zone="inside", notified_at=NULL')->execute([$uid, $cat, $sym, $up, $lo]);
+                    }
+                    self::out(['ok' => true]);
+                    return;
+                }
+                $st = $pdo->prepare('SELECT upper_price, lower_price, zone FROM price_levels WHERE user_id=? AND category=? AND symbol=?');
+                $st->execute([$uid, $cat, $sym]);
+                $r = $st->fetch();
+                self::out(['levels' => $r ? ['upper' => $r['upper_price'] !== null ? (float) $r['upper_price'] : null, 'lower' => $r['lower_price'] !== null ? (float) $r['lower_price'] : null, 'zone' => $r['zone']] : null]);
+                return;
+            }
             case '/api/symbols':
                 self::out(Market::symbols(Market::checkCategory($_GET['category'] ?? 'linear')));
                 return;

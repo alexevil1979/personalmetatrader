@@ -7,6 +7,9 @@ use InvalidArgumentException;
 
 final class Auth
 {
+    private const REM_COOKIE = 'pmtrem';
+    private const REM_TTL = 2592000; // 30 days
+
     private static ?array $user = null;
     private static bool $loaded = false;
 
@@ -52,7 +55,62 @@ final class Auth
             $st->execute([(int) $_SESSION['uid']]);
             self::$user = $st->fetch() ?: null;
         }
+        if (!self::$user) {
+            self::resumeFromRemember();
+        }
         return self::$user;
+    }
+
+    /**
+     * Long-lived per-device login (30 days), independent of PHP sessions: a login elsewhere
+     * rotates only that device's session, this device silently re-auths from the cookie.
+     */
+    public static function issueRemember(int $uid): void
+    {
+        $selector = bin2hex(random_bytes(12));
+        $token = bin2hex(random_bytes(32));
+        Db::pdo()->prepare('INSERT INTO auth_tokens (user_id, selector, token_hash, expires_at) VALUES (?,?,?,DATE_ADD(NOW(), INTERVAL 30 DAY))')->execute([$uid, $selector, hash('sha256', $token)]);
+        self::setRemCookie($selector . ':' . $token);
+        Db::pdo()->exec('DELETE FROM auth_tokens WHERE expires_at < NOW()');
+    }
+
+    public static function forgetRemember(): void
+    {
+        $c = $_COOKIE[self::REM_COOKIE] ?? '';
+        if (preg_match('/^[a-f0-9]{24}:/', $c)) {
+            Db::pdo()->prepare('DELETE FROM auth_tokens WHERE selector=?')->execute([substr($c, 0, 24)]);
+        }
+        setcookie(self::REM_COOKIE, '', ['expires' => time() - 3600, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax']);
+        unset($_COOKIE[self::REM_COOKIE]);
+    }
+
+    private static function setRemCookie(string $v): void
+    {
+        $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+        setcookie(self::REM_COOKIE, $v, ['expires' => time() + self::REM_TTL, 'path' => '/', 'secure' => $https, 'httponly' => true, 'samesite' => 'Lax']);
+        $_COOKIE[self::REM_COOKIE] = $v;
+    }
+
+    private static function resumeFromRemember(): void
+    {
+        $c = $_COOKIE[self::REM_COOKIE] ?? '';
+        if (!preg_match('/^([a-f0-9]{24}):([a-f0-9]{64})$/', $c, $m)) {
+            return;
+        }
+        $st = Db::pdo()->prepare('SELECT t.id, t.user_id, t.token_hash FROM auth_tokens t JOIN users u ON u.id=t.user_id WHERE t.selector=? AND t.expires_at > NOW() AND u.is_active=1');
+        $st->execute([$m[1]]);
+        $r = $st->fetch();
+        if (!$r || !hash_equals($r['token_hash'], hash('sha256', $m[2]))) {
+            return;
+        }
+        // keep the token (parallel requests resume concurrently); slide the expiry for active devices
+        Db::pdo()->prepare('UPDATE auth_tokens SET last_used_at=NOW(), expires_at=DATE_ADD(NOW(), INTERVAL 30 DAY) WHERE id=? AND (last_used_at IS NULL OR last_used_at < DATE_SUB(NOW(), INTERVAL 1 HOUR))')->execute([(int) $r['id']]);
+        self::setRemCookie($c);
+        session_regenerate_id(true);
+        $_SESSION['uid'] = (int) $r['user_id'];
+        $st = Db::pdo()->prepare('SELECT id, email, role FROM users WHERE id=? AND is_active=1');
+        $st->execute([(int) $r['user_id']]);
+        self::$user = $st->fetch() ?: null;
     }
 
     public static function userCount(): int
@@ -108,6 +166,7 @@ final class Auth
         session_regenerate_id(true);
         $_SESSION['uid'] = (int) $u['id'];
         unset($_SESSION['csrf']);
+        self::issueRemember((int) $u['id']);
         Db::pdo()->prepare('UPDATE users SET last_login_at=NOW() WHERE id=?')->execute([$u['id']]);
         self::$loaded = false;
         return ['id' => (int) $u['id'], 'email' => $u['email'], 'role' => $u['role']];
@@ -116,6 +175,7 @@ final class Auth
     public static function logout(): void
     {
         self::start();
+        self::forgetRemember();
         $_SESSION = [];
         session_destroy();
         self::$user = null;
