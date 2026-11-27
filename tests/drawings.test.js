@@ -24,4 +24,18 @@ assert.deepStrictEqual([pencil.L[1].b.x, pencil.L[1].b.y], [50, 380]);
 // objects keep their price after a "zoom" (different env) because they are stored in time/price
 const E2 = { ...E, Y: (p) => 500 - p * 2 };
 assert.strictEqual(geom({ id: 1, type: 'hline', pts: [{ t: 1000, p: 100 }], style: {} }, E2).L[0].a.y, 300);
-console.log('OK drawings');
+// longpos / shortpos R:R zones and labels
+const lp = geom({ id: 2, type: 'longpos', pts: [{ t: 1100, p: 100 }, { t: 1300, p: 120 }, { t: 1300, p: 90 }], style: {} }, E);
+assert.strictEqual(lp.F.length, 2);
+assert.ok(lp.T.some((t) => t.s === 'R:R 2.00'), 'longpos R:R label');
+const sp = geom({ id: 3, type: 'shortpos', pts: [{ t: 1100, p: 100 }, { t: 1300, p: 80 }, { t: 1300, p: 110 }], style: {} }, E);
+assert.strictEqual(sp.F.length, 2);
+assert.ok(sp.T.some((t) => t.s === 'R:R 2.00'), 'shortpos R:R label');
+// pricerange / daterange / ellipse
+const pr = geom({ id: 4, type: 'pricerange', pts: [{ t: 1100, p: 100 }, { t: 1500, p: 110 }], style: {} }, E);
+assert.ok(pr.T[0].s.includes('+10.00 (+10.00%)'), 'pricerange delta');
+const dr = geom({ id: 5, type: 'daterange', pts: [{ t: 1100, p: 100 }, { t: 1700, p: 120 }], style: {} }, { ...E, step: 60 });
+assert.ok(dr.T[0].s.includes('10 бар.'), 'daterange bars');
+const el = geom({ id: 6, type: 'ellipse', pts: [{ t: 1100, p: 100 }, { t: 1500, p: 200 }], style: {} }, E);
+assert.strictEqual(el.L.length, 36);
+console.log('OK drawings (' + Object.keys(NEED).length + ' types)');

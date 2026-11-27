@@ -126,4 +126,19 @@ near(Q.tr[300], Math.max(C[300].high - C[300].low, Math.abs(C[300].high - cl[299
 assert.ok(Number.isFinite(Q.hm[300]) && Number.isFinite(Q.atr[300]));
 const mfi = REG.mfi.calc(C, { period: 14 }); for (const i of [50, 300]) near(Q.mf[i], mfi.v[i], 1e-6, 'mfi');
 console.log(`OK ta.* (supertrend agreement ${agree}/${total})`);
+// ---- fill() between plots and hlines ----
+r = go(`
+p1 = plot(ta.sma(close, 10), "fast")
+p2 = plot(ta.sma(close, 20), "slow")
+h1 = hline(105, "hi")
+h2 = hline(95, "lo")
+fill(p1, p2, color=ta.sma(close, 10) > ta.sma(close, 20) ? color.new(color.green, 80) : color.new(color.red, 80))
+fill(h1, h2, color=color.new(color.blue, 90))
+`);
+assert.strictEqual(r.fills.length, 2, 'fills count');
+assert.strictEqual(r.fills[0].a.kind, 'plot'); assert.strictEqual(r.fills[0].b.kind, 'plot');
+assert.ok(r.fills[0].colors[50] && r.fills[0].colors[50].startsWith('rgba('));
+assert.strictEqual(r.fills[1].a.kind, 'hline'); assert.strictEqual(r.fills[1].a.price, 105);
+console.log('OK fill()');
+
 console.log('ALL PINE EXTENSION TESTS PASSED');

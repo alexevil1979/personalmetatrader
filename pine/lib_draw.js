@@ -12,7 +12,7 @@ const tag = (o, k) => { Object.defineProperty(o, '_k', { value: k }); return o; 
 
 // ---------- plots ----------
 reg('plot', ['series', 'title', 'color', 'linewidth', 'style', 'trackprice', 'histbase', 'offset', 'join', 'editable', 'show_last', 'display'], {}, (P) => (s, a, n) => {
-  const pl = P.out.plots[s] || (P.out.plots[s] = { title: n.title || a[1] || `Plot ${Object.keys(P.out.plots).length}`, color: '#2962FF', width: 1, style: 'line', values: [], colors: [], offset: 0 });
+  const pl = P.out.plots[s] || (P.out.plots[s] = tag({ title: n.title || a[1] || `Plot ${Object.keys(P.out.plots).length}`, color: '#2962FF', width: 1, style: 'line', values: [], colors: [], offset: 0 }, 'plot'));
   const i = P.C.i, v = val(a[0]); pl.values[i] = typeof v === 'number' && Number.isFinite(v) ? v : null;
   const c = n.color !== undefined ? n.color : a[2]; if (typeof c === 'string') pl.colors[i] = c;
   pl.width = n.linewidth ?? a[3] ?? 1; pl.style = n.style ?? a[4] ?? 'line'; pl.offset = n.offset ?? 0; pl.display = n.display;
@@ -36,7 +36,22 @@ shapeFn('plotshape', ['series', 'title', 'style', 'location', 'color', 'offset',
 shapeFn('plotchar', ['series', 'title', 'char', 'location', 'color', 'offset', 'text', 'textcolor', 'editable', 'size', 'show_last', 'display']);
 reg('color', ['c'], {}, () => (s, a) => (typeof a[0] === 'string' ? a[0] : 'rgba(0,0,0,0)')); // color(na) -> fully transparent
 reg('bgcolor', ['color', 'offset', 'editable', 'show_last', 'title', 'display'], {}, (P) => (s, a, n) => { const c = n.color !== undefined ? n.color : a[0]; if (typeof c === 'string') P.out.bg[P.C.i] = c; });
-reg('hline', ['price', 'title', 'color', 'linestyle', 'linewidth'], {}, (P) => (s, a, n) => { const found = P.out.hlines.find((h) => h.site === s); if (!found) P.out.hlines.push({ site: s, price: a[0], title: n.title || a[1] || '', color: colorOr(n.color ?? a[2], '#787B86'), style: n.linestyle ?? a[3] ?? 'dashed' }); });
+reg('hline', ['price', 'title', 'color', 'linestyle', 'linewidth'], {}, (P) => (s, a, n) => {
+  let found = P.out.hlines.find((h) => h.site === s);
+  if (!found) {
+    found = tag({ site: s, price: a[0], title: n.title || a[1] || '', color: colorOr(n.color ?? a[2], '#787B86'), style: n.linestyle ?? a[3] ?? 'dashed' }, 'hline');
+    P.out.hlines.push(found);
+  }
+  return found;
+});
+reg('fill', ['plot1', 'plot2', 'color', 'title', 'editable', 'show_last', 'fillgaps', 'display'], {}, (P) => (s, a, n) => {
+  const p1 = a[0], p2 = a[1];
+  if (!p1 || !p2) return;
+  let f = P.out.fills.find((x) => x.site === s);
+  if (!f) { f = { site: s, p1, p2, colors: [] }; P.out.fills.push(f); }
+  const c = n.color !== undefined ? n.color : a[2];
+  if (typeof c === 'string') f.colors[P.C.i] = c;
+});
 
 // ---------- labels ----------
 const limit = (P, list, max) => { const live = list.filter((o) => !o.deleted && !o.shape); for (let k = 0; k < live.length - max; k++) live[k].deleted = true; };

@@ -117,7 +117,7 @@
       const d = cols(c), mid = (n) => M.map2(M.highest(d.h, n), M.lowest(d.l, n), (a, b) => (a + b) / 2);
       const t = mid(p.tenkan), k = mid(p.kijun);
       return { tenkan: t, kijun: k, spanA: M.map2(t, k, (a, b) => (a + b) / 2), spanB: mid(p.senkou), chikou: d.c.slice() };
-    });
+    }, { clouds: [{ a: 'spanA', b: 'spanB', upColor: 'rgba(38,166,154,0.18)', dnColor: 'rgba(239,83,80,0.18)', shift: 'disp' }] });
   add('psar', 'Parabolic SAR', 'Тренд', true, [P('step', 'Шаг', 0.02, { step: 0.01 }), P('max', 'Максимум', 0.2, { step: 0.05 })], [O('v', 'SAR', '#ff9800', 'dots')], (c, p) => {
     const d = cols(c), n = c.length, out = nul(n); if (n < 2) return { v: out };
     let up = d.c[1] >= d.c[0], af = p.step, ep = up ? d.h[0] : d.l[0], sar = up ? d.l[0] : d.h[0];
@@ -201,18 +201,18 @@
     [O('mid', 'Mid', '#ff9800'), O('upper', 'Upper', '#2962ff'), O('lower', 'Lower', '#2962ff')], (c, p) => {
       const s = source(cols(c), p.src), mid = M.sma(s, p.period), sd = M.stdev(s, p.period);
       return { mid, upper: M.map2(mid, sd, (a, b) => a + p.mult * b), lower: M.map2(mid, sd, (a, b) => a - p.mult * b) };
-    });
+    }, { clouds: [{ a: 'upper', b: 'lower', upColor: 'rgba(41,98,255,0.10)' }] });
   add('atr', 'ATR', 'Волатильность', false, [P('period', 'Период', 14)], [O('v', 'ATR', '#ff9800')], (c, p) => { const d = cols(c); return { v: M.atr(d.h, d.l, d.c, p.period) }; });
   add('keltner', 'Keltner Channels', 'Волатильность', true, [P('period', 'EMA период', 20), P('atr', 'ATR период', 10), P('mult', 'Множитель', 2, { step: 0.1 })],
     [O('mid', 'Mid', '#ff9800'), O('upper', 'Upper', '#2962ff'), O('lower', 'Lower', '#2962ff')], (c, p) => {
       const d = cols(c), mid = M.ema(d.c, p.period), a = M.atr(d.h, d.l, d.c, p.atr);
       return { mid, upper: M.map2(mid, a, (x, y) => x + p.mult * y), lower: M.map2(mid, a, (x, y) => x - p.mult * y) };
-    });
+    }, { clouds: [{ a: 'upper', b: 'lower', upColor: 'rgba(41,98,255,0.09)' }] });
   add('donchian', 'Donchian Channels', 'Волатильность', true, [P('period', 'Период', 20)],
     [O('upper', 'Upper', '#2962ff'), O('lower', 'Lower', '#2962ff'), O('mid', 'Mid', '#ff9800')], (c, p) => {
       const d = cols(c), u = M.highest(d.h, p.period), l = M.lowest(d.l, p.period);
       return { upper: u, lower: l, mid: M.map2(u, l, (a, b) => (a + b) / 2) };
-    });
+    }, { clouds: [{ a: 'upper', b: 'lower', upColor: 'rgba(41,98,255,0.09)' }] });
   add('stdev', 'Standard Deviation', 'Волатильность', false, [P('period', 'Период', 20), srcParam], [O('v', 'StdDev', '#9c27b0')], (c, p) => ({ v: M.stdev(source(cols(c), p.src), p.period) }));
 
   // ---------- Volume ----------
@@ -259,23 +259,39 @@
     const lv = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1].map((r) => ({ value: up ? H - (H - L) * r : L + (H - L) * r, label: (r * 100).toFixed(1) + '%', from }));
     return { levels: lv };
   });
-  add('vprofile', 'Volume Profile', 'Дополнительно', true, [P('lookback', 'Баров назад', 200), P('bins', 'Уровней', 24), P('va', 'Value Area %', 70)],
-    [O('levels', 'POC/VAH/VAL', '#00bcd4', 'levels')], (c, p) => {
-      const n = c.length, s = Math.max(0, n - p.lookback); let hi = -Infinity, lo = Infinity;
-      for (let i = s; i < n; i++) { hi = Math.max(hi, c[i].high); lo = Math.min(lo, c[i].low); }
-      const bins = new Array(p.bins).fill(0), step = (hi - lo) / p.bins || 1;
-      for (let i = s; i < n; i++) { // spread volume over the bins the candle covers
-        const a = Math.min(p.bins - 1, Math.floor((c[i].low - lo) / step)), b = Math.min(p.bins - 1, Math.floor((c[i].high - lo) / step));
-        for (let j = a; j <= b; j++) bins[j] += c[i].volume / (b - a + 1);
+  add('vprofile', 'Volume Profile (VRVP)', 'Дополнительно', true, [P('mode', 'Режим', 'visible', { type: 'select', options: ['visible', 'lookback'] }), P('lookback', 'Баров (для lookback)', 200), P('bins', 'Уровней', 24), P('va', 'Value Area %', 70)],
+    [O('levels', 'POC/VAH/VAL', '#00bcd4', 'levels')], (c, p, vis) => {
+      const n = c.length;
+      let s = Math.max(0, n - p.lookback), e = n - 1;
+      if (p.mode === 'visible' && vis && vis.from !== undefined && vis.to !== undefined) {
+        s = Math.max(0, Math.min(n - 1, Math.floor(vis.from)));
+        e = Math.max(s, Math.min(n - 1, Math.ceil(vis.to)));
       }
-      let poc = 0; bins.forEach((v, i) => { if (v > bins[poc]) poc = i; });
-      const total = bins.reduce((x, y) => x + y, 0); let acc = bins[poc], a = poc, b = poc;
-      while (acc < total * p.va / 100 && (a > 0 || b < p.bins - 1)) {
-        const up = b < p.bins - 1 ? bins[b + 1] : -1, dn = a > 0 ? bins[a - 1] : -1;
-        if (up >= dn) { b++; acc += bins[b]; } else { a--; acc += bins[a]; }
+      let hi = -Infinity, lo = Infinity;
+      for (let i = s; i <= e; i++) { hi = Math.max(hi, c[i].high); lo = Math.min(lo, c[i].low); }
+      const nBins = Math.max(4, p.bins || 24), bins = Array.from({ length: nBins }, () => ({ upVol: 0, downVol: 0, total: 0 }));
+      const step = (hi - lo) / nBins || 1;
+      for (let i = s; i <= e; i++) {
+        const a = Math.min(nBins - 1, Math.max(0, Math.floor((c[i].low - lo) / step)));
+        const b = Math.min(nBins - 1, Math.max(0, Math.floor((c[i].high - lo) / step)));
+        const part = c[i].volume / (b - a + 1), isUp = c[i].close >= c[i].open;
+        for (let j = a; j <= b; j++) {
+          if (isUp) bins[j].upVol += part; else bins[j].downVol += part;
+          bins[j].total += part;
+        }
+      }
+      let poc = 0; bins.forEach((v, i) => { if (v.total > bins[poc].total) poc = i; });
+      const total = bins.reduce((x, y) => x + y.total, 0); let acc = bins[poc].total, a = poc, b = poc;
+      while (acc < total * p.va / 100 && (a > 0 || b < nBins - 1)) {
+        const up = b < nBins - 1 ? bins[b + 1].total : -1, dn = a > 0 ? bins[a - 1].total : -1;
+        if (up >= dn) { b++; acc += bins[b].total; } else { a--; acc += bins[a].total; }
       }
       const mid = (i) => lo + (i + 0.5) * step;
-      return { levels: [{ value: mid(poc), label: 'POC', from: s }, { value: lo + (b + 1) * step, label: 'VAH', from: s }, { value: lo + a * step, label: 'VAL', from: s }] };
+      const outBins = bins.map((v, i) => ({ low: lo + i * step, high: lo + (i + 1) * step, upVol: v.upVol, downVol: v.downVol, total: v.total }));
+      return {
+        levels: [{ value: mid(poc), label: 'POC', from: s, color: '#ff9800' }, { value: lo + (b + 1) * step, label: 'VAH', from: s }, { value: lo + a * step, label: 'VAL', from: s }],
+        profile: { bins: outBins, pocIdx: poc, vaLoIdx: a, vaHiIdx: b },
+      };
     });
   add('structure', 'Market Structure', 'Дополнительно', true, [P('left', 'Слева', 5), P('right', 'Справа', 5)], [O('markers', 'Маркеры', '#ff9800', 'markers')], (c, p) => {
     const d = cols(c), sw = swings(d, p.left, p.right), mk = []; let ph = null, pl = null;
@@ -293,6 +309,112 @@
       const last = c[n - 1].close;
       const lv = cl.sort((a, b) => b.n - a.n).slice(0, p.max).map((g) => { const v = g.sum / g.n; return { value: v, label: (v > last ? 'R' : 'S') + ' x' + g.n, from: s + g.i, color: v > last ? '#ef535099' : '#26a69a99' }; });
       return { levels: lv };
+    });
+
+  // ---------- 6 Additional Pro Indicators ----------
+  add('stochrsi', 'Stochastic RSI', 'Осцилляторы', false, [P('k', 'Smooth K', 3), P('d', 'Smooth D', 3), P('rsi', 'RSI период', 14), P('stoch', 'Stoch период', 14), srcParam],
+    [O('k', '%K', '#2962ff'), O('d', '%D', '#ff9800')], (c, p) => {
+      const s = source(cols(c), p.src), g = [0], l = [0];
+      for (let i = 1; i < s.length; i++) { const dlt = s[i] - s[i - 1]; g.push(Math.max(dlt, 0)); l.push(Math.max(-dlt, 0)); }
+      const rsi = [null].concat(M.map2(M.rma(g.slice(1), p.rsi), M.rma(l.slice(1), p.rsi), (a, b) => (b === 0 ? 100 : 100 - 100 / (1 + a / b))));
+      const st = first(rsi), raw = nul(c.length);
+      if (st >= 0) {
+        for (let i = st + p.stoch - 1; i < c.length; i++) {
+          let hh = -Infinity, ll = Infinity;
+          for (let j = 0; j < p.stoch; j++) { hh = Math.max(hh, rsi[i - j]); ll = Math.min(ll, rsi[i - j]); }
+          raw[i] = hh === ll ? 50 : 100 * (rsi[i] - ll) / (hh - ll);
+        }
+      }
+      const k = M.sma(raw, p.k);
+      return { k, d: M.sma(k, p.d) };
+    }, { hlines: [80, 20] });
+
+  add('emaribbon', 'EMA Ribbon', 'Тренд', true, [P('base', 'Старт период', 20), P('step', 'Шаг', 5), srcParam],
+    ['#2962ff', '#1e88e5', '#00acc1', '#26a69a', '#66bb6a', '#ffa726', '#ef5350', '#ab47bc'].map((col, i) => O('e' + i, 'EMA' + (i + 1), col)), (c, p) => {
+      const s = source(cols(c), p.src), out = {};
+      for (let i = 0; i < 8; i++) out['e' + i] = M.ema(s, p.base + i * p.step);
+      return out;
+    });
+
+  add('squeeze', 'Squeeze Momentum', 'Волатильность', false, [P('bbLen', 'BB период', 20), P('bbMult', 'BB откл.', 2, { step: 0.1 }), P('kcLen', 'KC период', 20), P('kcMult', 'KC множ.', 1.5, { step: 0.1 }), P('momLen', 'Mom период', 20)],
+    [O('mom', 'Momentum', '#26a69a', 'hist'), O('sqz', 'Squeeze', '#ef5350', 'dots')], (c, p) => {
+      const d = cols(c), n = c.length;
+      const midBB = M.sma(d.c, p.bbLen), sd = M.stdev(d.c, p.bbLen);
+      const midKC = M.sma(d.c, p.kcLen), atr = M.sma(M.tr(d.h, d.l, d.c), p.kcLen);
+      const hh = M.highest(d.h, p.momLen), ll = M.lowest(d.l, p.momLen), smaC = M.sma(d.c, p.momLen);
+      const valSrc = d.c.map((x, i) => (hh[i] === null || smaC[i] === null ? null : x - ((hh[i] + ll[i]) / 2 + smaC[i]) / 2));
+      const mom = nul(n), sqz = nul(n), mCol = nul(n), sCol = nul(n);
+      for (let i = p.momLen - 1; i < n; i++) {
+        let ok = true;
+        for (let j = 0; j < p.momLen; j++) if (valSrc[i - j] === null) { ok = false; break; }
+        if (ok) {
+          let sx = 0, sy = 0, sxy = 0, sxx = 0;
+          for (let x = 0; x < p.momLen; x++) { const y = valSrc[i - (p.momLen - 1 - x)]; sx += x; sy += y; sxy += x * y; sxx += x * x; }
+          const sl = (p.momLen * sxy - sx * sy) / (p.momLen * sxx - sx * sx), ic = (sy - sl * sx) / p.momLen;
+          mom[i] = ic + sl * (p.momLen - 1);
+          const prev = mom[i - 1] ?? 0;
+          mCol[i] = mom[i] >= 0 ? (mom[i] > prev ? '#26a69a' : '#1b5e20') : (mom[i] < prev ? '#ef5350' : '#880e4f');
+        }
+        if (midBB[i] !== null && sd[i] !== null && midKC[i] !== null && atr[i] !== null) {
+          const sqOn = (midBB[i] + p.bbMult * sd[i] < midKC[i] + p.kcMult * atr[i]) && (midBB[i] - p.bbMult * sd[i] > midKC[i] - p.kcMult * atr[i]);
+          sqz[i] = 0;
+          sCol[i] = sqOn ? '#ef5350' : '#26a69a';
+        }
+      }
+      return { mom, sqz, colors: { mom: mCol, sqz: sCol } };
+    });
+
+  add('cvd', 'Volume Delta / CVD', 'Объём', false, [], [O('v', 'CVD', '#2962ff'), O('delta', 'Delta', '#26a69a', 'hist')], (c) => {
+    let acc = 0; const v = [], delta = [], dCol = [];
+    for (const k of c) {
+      const r = k.high - k.low;
+      const dl = r === 0 ? (k.close >= k.open ? k.volume : -k.volume) : k.volume * ((2 * k.close - k.high - k.low) / r);
+      acc += dl; v.push(acc); delta.push(dl); dCol.push(dl >= 0 ? '#26a69a88' : '#ef535088');
+    }
+    return { v, delta, colors: { delta: dCol } };
+  });
+
+  add('zigzag', 'ZigZag', 'Дополнительно', true, [P('pct', 'Отклонение %', 3, { min: 0.2, step: 0.2 })], [O('v', 'ZigZag', '#ff9800')], (c, p) => {
+    const n = c.length, out = nul(n); if (n < 2) return { v: out };
+    out[0] = c[0].close;
+    const thr = Math.max(0.001, p.pct / 100);
+    const piv = [{ i: 0, p: c[0].close, dir: 0 }];
+    let dir = 0, extI = 0, extP = c[0].close;
+    for (let i = 1; i < n; i++) {
+      if (dir >= 0) {
+        if (c[i].high >= extP) { extP = c[i].high; extI = i; }
+        if ((extP - c[i].low) / extP >= thr) { piv.push({ i: extI, p: extP, dir: 1 }); dir = -1; extI = i; extP = c[i].low; }
+      }
+      if (dir <= 0) {
+        if (c[i].low <= extP) { extP = c[i].low; extI = i; }
+        if ((c[i].high - extP) / extP >= thr) { piv.push({ i: extI, p: extP, dir: -1 }); dir = 1; extI = i; extP = c[i].high; }
+      }
+    }
+    piv.push({ i: extI, p: extP, dir });
+    for (let k = 1; k < piv.length; k++) {
+      const a = piv[k - 1], b = piv[k], span = b.i - a.i;
+      if (span <= 0) { out[b.i] = b.p; continue; }
+      for (let i = a.i; i <= b.i; i++) out[i] = a.p + ((b.p - a.p) * (i - a.i)) / span;
+    }
+    return { v: out };
+  });
+
+  add('sessions', 'Trading Sessions (UTC)', 'Дополнительно', true, [P('asia', 'Азия (00-08)', 1, { min: 0, max: 1 }), P('london', 'Лондон (07-16)', 1, { min: 0, max: 1 }), P('ny', 'Нью-Йорк (13-22)', 1, { min: 0, max: 1 })],
+    [O('markers', 'Сессии', '#2962ff', 'markers')], (c, p) => {
+      const mk = [], bg = nul(c.length); let prevH = -1;
+      for (let i = 0; i < c.length; i++) {
+        const h = new Date(c[i].time * 1000).getUTCHours();
+        if (p.asia && h >= 0 && h < 8) bg[i] = 'rgba(255,152,0,0.06)';
+        if (p.london && h >= 7 && h < 16) bg[i] = bg[i] ? 'rgba(41,98,255,0.09)' : 'rgba(41,98,255,0.06)';
+        if (p.ny && h >= 13 && h < 22) bg[i] = bg[i] ? 'rgba(38,166,154,0.09)' : 'rgba(38,166,154,0.06)';
+        if (h !== prevH) {
+          if (p.asia && h === 0) mk.push({ i, pos: 'above', text: 'ASIA', color: '#ff9800' });
+          if (p.london && h === 7) mk.push({ i, pos: 'above', text: 'LDN', color: '#2962ff' });
+          if (p.ny && h === 13) mk.push({ i, pos: 'above', text: 'NY', color: '#26a69a' });
+        }
+        prevH = h;
+      }
+      return { markers: mk, bg };
     });
 
   const defaults = (id) => Object.fromEntries(REG[id].params.map((q) => [q.k, q.def]));

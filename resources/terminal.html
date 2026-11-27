@@ -81,9 +81,20 @@
 
 <main>
   <aside id="watch">
-    <div class="panel-title"><span>Обзор рынка</span><button id="watchClose" title="Скрыть панель (кнопка «Обзор» в шапке вернёт её)">✕</button></div>
-    <input id="watchFilter" placeholder="Фильтр">
-    <div id="watchList"></div>
+    <div class="panel-title">
+      <div class="side-tabs">
+        <button id="tabWatch" class="on">Обзор</button>
+        <button id="tabObj">Объекты</button>
+      </div>
+      <button id="watchClose" title="Скрыть панель (кнопка «Обзор» в шапке вернёт её)">✕</button>
+    </div>
+    <div id="watchPan">
+      <input id="watchFilter" placeholder="Фильтр">
+      <div id="watchList"></div>
+    </div>
+    <div id="objTreePan" class="hidden">
+      <div id="objTree"></div>
+    </div>
   </aside>
   <section id="charts"></section>
 </main>
@@ -92,7 +103,16 @@
   <div id="infoGrid"></div>
 </footer>
 
-<div id="objBar" class="hidden"><div id="objName"></div><input type="color" id="objColor" title="Цвет"><input type="number" id="objWidth" min="1" max="6" title="Толщина"><button id="objDel">Удалить</button></div>
+<div id="objBar" class="hidden">
+  <div id="objName"></div>
+  <input type="color" id="objColor" title="Цвет">
+  <input type="number" id="objWidth" min="1" max="6" title="Толщина">
+  <select id="objDash" title="Стиль линии"><option value="solid">───</option><option value="dashed">- - -</option><option value="dotted">····</option></select>
+  <input type="range" id="objAlpha" min="0" max="60" step="5" title="Прозрачность заливки">
+  <button id="objLock" title="Заблокировать/разблокировать">🔓</button>
+  <button id="objClone" title="Клонировать (Ctrl+D)">⧉</button>
+  <button id="objDel" title="Удалить (Del)">🗑</button>
+</div>
 
 <div id="symDlg" class="dlg hidden"><div class="dlgbox symbox">
   <div class="symhead"><span id="symDlgTitle">Поиск символа</span><button id="symClose" class="setx">✕</button></div>
@@ -115,11 +135,21 @@
   </div>
 </div></div>
 
-<div id="indDlg" class="dlg hidden"><div class="dlgbox">
-  <div class="dlghead"><b>Индикаторы</b> <span id="indFor"></span><button id="indClose">✕</button></div>
-  <div class="dlgrow"><select id="indAdd"></select><button id="indAddBtn">Добавить</button>
-    <span class="grow"></span><select id="tplSel"></select><button id="tplApply">Применить</button><button id="tplSave">Сохранить шаблон</button><button id="tplDel">Удалить</button></div>
-  <div id="indList"></div>
+<div id="indDlg" class="dlg hidden"><div class="dlgbox indcatbox">
+  <div class="dlghead"><b>Индикаторы и скрипты</b> <span id="indFor"></span><button id="indClose">✕</button></div>
+  <div class="dlgrow">
+    <input id="indSearch" placeholder="Поиск индикатора или скрипта…" style="flex:1">
+    <select id="tplSel"></select><button id="tplApply">Применить</button><button id="tplSave">Сохранить шаблон</button><button id="tplDel" title="Удалить шаблон">✕</button>
+  </div>
+  <div id="indTabs" class="symtabs">
+    <button data-it="all" class="on">Все</button>
+    <button data-it="builtin">Встроенные</button>
+    <button data-it="scripts">Мои скрипты</button>
+    <button data-it="fav">Избранное ★</button>
+    <button data-it="active">На графике (<span id="indActCnt">0</span>)</button>
+  </div>
+  <div id="indCatalog"></div>
+  <div id="indList" class="hidden"></div>
 </div></div>
 
 <div id="testDlg" class="dlg hidden"><div class="dlgbox mqlbox">

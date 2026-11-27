@@ -18,7 +18,7 @@
   const state = {
     category: 'linear', theme: 'dark', tz: 'UTC', layout: '1',
     syncOpts: { symbol: false, tf: false, crosshair: false, range: false },
-    splits: {}, layoutName: '',
+    splits: {}, layoutName: '', favInds: [],
     watch: {}, showWatch: true, showInfo: true, showLegend: true, panes: [],
   };
   const normLayout = (v) => (v === 2 || v === '2' ? '2v' : LAYOUT_LABELS[String(v)] ? String(v) : '1');
@@ -32,6 +32,7 @@
     }
     delete state.sync;
     if (!state.splits || typeof state.splits !== 'object') state.splits = {};
+    if (!Array.isArray(state.favInds)) state.favInds = [];
     if (!state.watch || typeof state.watch !== 'object') state.watch = {};
     if (!Array.isArray(state.panes)) state.panes = [];
   }
@@ -41,6 +42,7 @@
   let panes = [];
   let active = 0;
   let rulerMode = false;
+  let magnetMode = 'off', stayInDraw = false, allDrawHidden = false;
   let syncingCross = false, syncingRange = false;
 
   let csrf = '', authed = false;
@@ -338,6 +340,24 @@
     goToDate: (p) => PMTUx.openGoToDate(p, state.tz),
     compare: (p) => openCompareFor(p),
   };
+  const drawingMenuHooks = {
+    onDrawingAction: (p, o, act) => {
+      const st = o.style || (o.style = {});
+      if (act === 'clone') { p.dw.select(o.id); p.dw.cloneSelected(); }
+      else if (act === 'lock') { p.dw.snapshot(); st.locked = !st.locked; p.dw.save(); p.dw.request(); }
+      else if (act === 'hide') { p.dw.snapshot(); st.hidden = !st.hidden; p.dw.save(); p.dw.request(); }
+      else if (act === 'front') p.dw.moveOrder(o.id, 'front');
+      else if (act === 'back') p.dw.moveOrder(o.id, 'back');
+      else if (act === 'text') {
+        const s = prompt('Текст / подпись', st.text || '');
+        if (s !== null) { p.dw.snapshot(); st.text = s; p.dw.save(); p.dw.request(); }
+      }
+      else if (act === 'del') {
+        const r = p.dw.remove(o.id);
+        if (r === 'locked') PMTUx.toast('Объект заблокирован', 'err');
+      }
+    },
+  };
 
   // ---------- Chart pane ----------
   class Pane {
@@ -345,7 +365,7 @@
       this.cfg = cfg;
       if (!cfg.indicators) cfg.indicators = [];
       if (!cfg.compares) cfg.compares = [];
-      this.ind = []; this.cmpSeries = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
+      this.ind = []; this.cmpSeries = []; this.subPovs = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null;
       this.indHidden = false; this.legCollapsed = false; this.lastCrossTime = null;
       this.el = document.createElement('div'); this.el.className = 'pane';
       this.el.innerHTML = '<div class="cv"></div><div class="ohlc"></div><div class="load"></div><div class="cnt hidden"></div>';
@@ -358,18 +378,31 @@
         let w = 0; try { w = this.chart.priceScale('right').width(); } catch { /* not ready */ }
         const r = this.cv.getBoundingClientRect();
         e.preventDefault();
-        if (e.clientX - r.left >= r.width - w - 4) showScaleMenu(this, e.clientX, e.clientY);
-        else PMTUx.showChartMenu(this, e.clientX, e.clientY, chartMenuHooks);
+        if (e.clientX - r.left >= r.width - w - 4) { showScaleMenu(this, e.clientX, e.clientY); return; }
+        const dh = this.dw.hit(e);
+        if (dh && dh.o.id >= 0) {
+          this.dw.select(dh.o.id);
+          PMTUx.showDrawingMenu(this, dh.o, e.clientX, e.clientY, drawingMenuHooks);
+          return;
+        }
+        PMTUx.showChartMenu(this, e.clientX, e.clientY, chartMenuHooks);
       });
       buildTools(this);
       this.dw = new PMTDraw.Drawings(this, drawHooks);
       this.pov = new PMTPineView.Overlay(this);
+      this.bov = new PMTPineView.BuiltInOverlay(this);
       this.ruler = new PMTUx.Ruler(this, { isRuler: () => rulerMode, activate: (p) => setActive(panes.indexOf(p)), doneRuler: () => setRuler(false) });
       this.chart = LightweightCharts.createChart(this.cv, { autoSize: true, crosshair: { mode: 0 }, timeScale: { timeVisible: true, rightOffset: 8 } });
       this.onReopen = () => this.refreshLatest();
       this.onMsg = (m) => this.live(m);
       this.chart.subscribeCrosshairMove((p) => { this.cross(p); syncCrosshairFrom(this, p); });
-      this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => { if (r && r.from < 15) this.loadOlder(); });
+      this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+        if (r && r.from < 15) this.loadOlder();
+        if (this.cfg.indicators.some((x) => x.type === 'vprofile' && x.visible !== false && (x.params.mode || 'visible') === 'visible')) {
+          clearTimeout(this.vpT);
+          this.vpT = setTimeout(() => this.refreshIndicators(false), 120);
+        }
+      });
       this.chart.timeScale().subscribeVisibleTimeRangeChange((tr) => syncRangeFrom(this, tr));
       this.el.addEventListener('mousedown', () => setActive(panes.indexOf(this)));
       this.applyTheme(); this.buildSeries();
@@ -455,7 +488,8 @@
       else if (ty === 'bars') this.main = this.chart.addSeries(LC.BarSeries, { upColor: t.up, downColor: t.dn, priceFormat: pf });
       else if (ty === 'hollow') this.main = this.chart.addSeries(LC.CandlestickSeries, { upColor: 'transparent', downColor: t.dn, borderUpColor: t.up, borderDownColor: t.dn, wickUpColor: t.up, wickDownColor: t.dn, priceFormat: pf });
       else this.main = this.chart.addSeries(LC.CandlestickSeries, { upColor: t.up, downColor: t.dn, borderUpColor: t.up, borderDownColor: t.dn, wickUpColor: t.up, wickDownColor: t.dn, priceFormat: pf });
-      this.dw.attach(); this.pov.attach(); this.ruler.attach();
+      this.dw.attach(); this.pov.attach(); this.bov.attach(); this.ruler.attach();
+      this.dw.setHidden(allDrawHidden);
       this.vol = this.chart.addSeries(LC.HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' }, 0);
       this.vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       this.render();
@@ -588,7 +622,9 @@
     // ---------- indicators ----------
     clearIndicators() {
       for (const it of this.ind) { Object.values(it.series).forEach((x) => { try { this.chart.removeSeries(x); } catch { /* gone */ } }); it.lv.forEach((x) => { try { this.chart.removeSeries(x); } catch { /* gone */ } }); }
-      this.ind = []; this.pov.clear(); if (this.mk) this.mk.setMarkers([]);
+      this.ind = []; this.pov.clear(); this.bov.clear();
+      this.subPovs.forEach((sp) => sp.detach()); this.subPovs = [];
+      if (this.mk) this.mk.setMarkers([]);
     }
     scheduleInd(newBar) {
       if (!this.cfg.indicators.length || this.indHidden) return;
@@ -599,19 +635,29 @@
     }
     refreshIndicators(full) {
       if (!this.main || !window.PMTInd) return;
-      if (this.indHidden) { this.clearIndicators(); this.cross(null); return; }
+      if (this.indHidden) { this.clearIndicators(); this.cross(null); if (this === panes[active]) renderObjTree(); return; }
       if (full) this.clearIndicators();
       const n = this.candles.length; if (!n) return;
       const step = n > 1 ? this.candles[n - 1].time - this.candles[n - 2].time : 3600;
       const tm = (i) => (i < n ? this.candles[i].time : this.candles[n - 1].time + (i - n + 1) * step);
+      let lr = null; try { lr = this.chart.timeScale().getVisibleLogicalRange(); } catch { /* ignore */ }
+      const off = this.dw.off(), vis = lr ? { from: lr.from - off, to: lr.to - off } : null;
       let paneIdx = 0; const markers = [];
+      const clouds = [], profiles = [], bgs = [];
       for (const inst of this.cfg.indicators) {
         if (inst.visible === false) continue;
         if (inst.type === 'mql') { const r = this.mqlItem(inst, full, paneIdx, markers); if (r === 'sep') paneIdx++; continue; }
         const def = PMTInd.REG[inst.type]; if (!def) continue;
         let it = this.ind.find((x) => x.inst === inst);
         if (!it) { if (!def.overlay) paneIdx++; it = { inst, pane: def.overlay ? 0 : paneIdx, series: {}, lv: [], out: null }; this.ind.push(it); this.buildItem(it, def); } else if (!def.overlay) paneIdx = Math.max(paneIdx, it.pane);
-        const out = it.out = def.calc(this.candles, inst.params);
+        const out = it.out = def.calc(this.candles, inst.params, vis);
+        if (def.clouds) {
+          for (const cl of def.clouds) {
+            if (out[cl.a] && out[cl.b]) clouds.push({ a: out[cl.a], b: out[cl.b], upColor: cl.upColor, dnColor: cl.dnColor, shift: cl.shift ? (inst.params[cl.shift] || 0) : 0 });
+          }
+        }
+        if (out.profile) profiles.push(out.profile);
+        if (out.bg) bgs.push(out.bg);
         for (const o of def.outputs) {
           const arr = out[o.k];
           if (o.type === 'levels') {
@@ -635,9 +681,11 @@
           }
         }
       }
+      this.bov.setData({ clouds, profiles, bgs });
       markers.sort((a, b) => a.time - b.time);
       if (markers.length || this.mk) { if (!this.mk) this.mk = LightweightCharts.createSeriesMarkers(this.main, []); this.mk.setMarkers(markers); }
       if (full && paneIdx > 0) { try { this.chart.panes()[0].setStretchFactor(3); } catch { /* old api */ } }
+      if (this === panes[active]) renderObjTree();
     }
 
     // ---------- MQL scripts ----------
@@ -664,7 +712,11 @@
       const step = n > 1 ? times[n - 1] - times[n - 2] : 3600, tm = (i) => (i < n ? times[i] : times[n - 1] + (i - n + 1) * step);
       it = { inst, pane, series: {}, lv: [], out: null, mql: true, res }; this.ind.push(it);
       const pine = res.info.lang === 'pine';
-      if (pine) { this.pov.set(inst.uid, res); (res.shapes || []).forEach((sh) => { const up = sh.location === 'abovebar' || sh.location === 'top'; markers.push({ time: res.times[sh.bar], position: up ? 'aboveBar' : 'belowBar', shape: ({ triangleup: 'arrowUp', arrowup: 'arrowUp', labelup: 'arrowUp', flag: 'arrowUp', triangledown: 'arrowDown', arrowdown: 'arrowDown', labeldown: 'arrowDown', square: 'square' })[sh.style] || 'circle', color: sh.color, text: String(sh.text || '') }); }); }
+      if (pine) {
+        if (!sep) this.pov.set(inst.uid, res);
+        (res.shapes || []).forEach((sh) => { const up = sh.location === 'abovebar' || sh.location === 'top'; markers.push({ time: res.times[sh.bar], position: up ? 'aboveBar' : 'belowBar', shape: ({ triangleup: 'arrowUp', arrowup: 'arrowUp', labelup: 'arrowUp', flag: 'arrowUp', triangledown: 'arrowDown', arrowdown: 'arrowDown', labeldown: 'arrowDown', square: 'square' })[sh.style] || 'circle', color: sh.color, text: String(sh.text || '') }); });
+      }
+      let firstSepS = null;
       res.plots.forEach((pl, k) => {
         if (pine) { pl = { ...pl, draw: ({ histogram: 'hist', columns: 'hist', circles: 'arrow', cross: 'arrow' })[pl.style] || 'line', shift: pl.offset || 0, style: 0 }; }
         const base = { color: pl.color, lineWidth: Math.max(1, pl.width), priceLineVisible: false, lastValueVisible: !!sep, title: pine ? pl.title : '', lineStyle: [0, 2, 1, 3, 3][pl.style] ?? 0 };
@@ -675,11 +727,18 @@
         const data = [];
         for (let i = 0; i < n; i++) { const j = i + (pl.shift || 0); if (j < 0) continue; const v = pl.values[i]; if (v === null) { if (pl.draw !== 'section') data.push({ time: tm(j) }); } else { const pt = { time: tm(j), value: v }; if (pl.colors && pl.colors[i]) pt.color = pl.colors[i]; data.push(pt); } }
         s2.setData(data); it.series['p' + k] = s2;
+        if (!firstSepS) firstSepS = s2;
         if (k === 0) {
           (res.info.levels || []).forEach((lv) => s2.createPriceLine({ price: lv, color: '#7d8590', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: '' }));
           if (sep && res.info.min !== null && res.info.max !== null) s2.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue: res.info.min, maxValue: res.info.max } }) });
         }
       });
+      if (pine && sep && firstSepS) {
+        const sub = new PMTPineView.Overlay(this, firstSepS);
+        sub.attach(firstSepS);
+        sub.set(inst.uid, res);
+        this.subPovs.push(sub);
+      }
       return sep ? 'sep' : null;
     }
     col(inst, o) { return (inst.style && inst.style.colors && inst.style.colors[o.k]) || o.color; }
@@ -781,7 +840,7 @@
     $('#typeBtn').textContent = (CHART_TYPES[c.type] || 'Свечи') + ' ▾';
     document.querySelectorAll('#typeMenu .mi').forEach((m) => m.classList.toggle('on', m.dataset.type === c.type));
     loadSymbols(c.category).catch(() => {});
-    renderWatch(); updateInfo(); updateObjBar();
+    renderWatch(); renderObjTree(); updateInfo(); updateObjBar();
   }
 
   function applyToPanes(patch) {
@@ -1008,11 +1067,22 @@
     document.addEventListener('keydown', scaleMenuEsc);
   }
 
-  // ---------- drawing tools & ruler wiring ----------
+  // ---------- drawing tools (categorized), object bar, object tree & ruler wiring ----------
   let tool = 'cursor';
-  const TOOL_GLYPHS = { hline: '─', vline: '│', trend: '╱', ray: '↗', channel: '▱', rect: '▭', fibret: 'Fib', fibext: 'FbE', fibfan: 'Fan', fibtime: 'FbT', pitchfork: 'Ψ', text: 'T', arrow: '➚', pricelabel: '$', pencil: '✎' };
-  const TOOL_BUTTONS = [['cursor', '⌖', 'Курсор / выбор'], ...Object.entries(PMTDraw.NAMES).filter(([k]) => !PMTDraw.SERVICE.includes(k)).map(([k, n]) => [k, TOOL_GLYPHS[k], n])]
-    .map(([k, g, n]) => `<button data-tool="${k}" title="${n}"${k === 'cursor' ? ' class="on"' : ''}>${g}</button>`).join('');
+  const TOOL_GLYPHS = {
+    hline: '─', hray: '↦', vline: '│', trend: '╱', ray: '↗', extline: '↔', infoline: '∠', channel: '▱',
+    fibret: 'Fib', fibext: 'FbE', fibfan: 'Fan', fibtime: 'FbT', pitchfork: 'Ψ',
+    rect: '▭', ellipse: '◯', pencil: '✎', arrow: '➚',
+    text: 'T', callout: '💬', pricelabel: '$',
+    longpos: '📈', shortpos: '📉', pricerange: '↕', daterange: '↔', avwap: 'VW',
+  };
+  const TOOL_GROUPS = [
+    ['lines', '╱', 'Линии и каналы', ['trend', 'ray', 'extline', 'infoline', 'hline', 'hray', 'vline', 'channel']],
+    ['fibs', 'Fib', 'Фибоначчи и вилы', ['fibret', 'fibext', 'fibfan', 'fibtime', 'pitchfork']],
+    ['shapes', '▭', 'Фигуры и стрелки', ['rect', 'ellipse', 'pencil', 'arrow']],
+    ['texts', 'T', 'Текст и заметки', ['text', 'callout', 'pricelabel']],
+    ['meas', '📈', 'Позиции и замеры', ['longpos', 'shortpos', 'pricerange', 'daterange', 'avwap']],
+  ];
 
   function buildTfbar(p) {
     const el = document.createElement('div'); el.className = 'tfdd';
@@ -1038,26 +1108,81 @@
   }
   function buildTools(p) {
     const el = document.createElement('div'); el.className = 'pTools';
-    el.innerHTML = TOOL_BUTTONS + '<button class="clr" title="Удалить все объекты на этом символе">⌫</button>';
+    const grpsHtml = TOOL_GROUPS.map(([gid, glyph, label, items]) => {
+      const pop = items.map((t) => `<div class="mi" data-tool="${t}"><span class="gl">${TOOL_GLYPHS[t]}</span><span>${PMTDraw.NAMES[t]}</span></div>`).join('');
+      return `<div class="pt-grp" data-grp="${gid}"><button class="pt-gbtn" data-grp="${gid}" title="${label}">${glyph}</button><div class="pt-pop hidden">${pop}</div></div>`;
+    }).join('');
+    el.innerHTML = `<button data-tool="cursor" title="Курсор / выбор" class="on">⌖</button>${grpsHtml}`
+      + '<div class="pt-sep"></div>'
+      + '<button data-act="magnet" title="Магнит (привязка к OHLC; или удерживайте Ctrl)">🧲</button>'
+      + '<button data-act="stay" title="Оставаться в режиме рисования">∞</button>'
+      + '<button data-act="hideall" title="Скрыть/показать все рисунки">👁</button>'
+      + '<button data-act="undo" title="Отменить (Ctrl+Z)">↶</button>'
+      + '<button data-act="redo" title="Повторить (Ctrl+Y)">↷</button>'
+      + '<button class="clr" data-act="clear" title="Удалить все объекты на этом символе">⌫</button>';
     el.onclick = (e) => {
+      const mi = e.target.closest('.pt-pop .mi');
+      if (mi) {
+        const t = mi.dataset.tool, grp = mi.closest('.pt-grp');
+        el.querySelectorAll('.pt-pop').forEach((x) => x.classList.add('hidden'));
+        if (grp) { grp.querySelector('.pt-gbtn').textContent = TOOL_GLYPHS[t]; grp.querySelector('.pt-gbtn').dataset.cur = t; }
+        setTool(t); return;
+      }
+      const gbtn = e.target.closest('.pt-gbtn');
+      if (gbtn) {
+        e.stopPropagation();
+        const pop = gbtn.parentElement.querySelector('.pt-pop'), was = !pop.classList.contains('hidden');
+        document.querySelectorAll('.pt-pop').forEach((x) => x.classList.add('hidden'));
+        if (!was) pop.classList.remove('hidden');
+        return;
+      }
       const b = e.target.closest('button'); if (!b) return;
-      if (b.classList.contains('clr')) { if (confirm('Удалить все объекты на этом символе?')) p.dw.clearAll(); return; }
-      setTool(b.dataset.tool);
+      if (b.dataset.tool) { setTool(b.dataset.tool); return; }
+      const act = b.dataset.act;
+      if (act === 'clear') { if (confirm('Удалить все объекты на этом символе?')) p.dw.clearAll(); }
+      else if (act === 'undo') { if (!p.dw.undo()) PMTUx.toast('Нечего отменять'); }
+      else if (act === 'redo') { if (!p.dw.redo()) PMTUx.toast('Нечего повторять'); }
+      else if (act === 'magnet') {
+        magnetMode = magnetMode === 'off' ? 'weak' : magnetMode === 'weak' ? 'strong' : 'off';
+        syncToolStates();
+        PMTUx.toast('Магнит: ' + ({ off: 'выкл', weak: 'слабый (OHLC)', strong: 'сильный (OHLC)' })[magnetMode]);
+      } else if (act === 'stay') {
+        stayInDraw = !stayInDraw; syncToolStates();
+      } else if (act === 'hideall') {
+        allDrawHidden = !allDrawHidden;
+        panes.forEach((pn) => pn.dw.setHidden(allDrawHidden));
+        syncToolStates();
+      }
     };
     p.el.appendChild(el);
+  }
+  function syncToolStates() {
+    document.querySelectorAll('.pTools [data-act="magnet"]').forEach((b) => { b.classList.toggle('on', magnetMode !== 'off'); b.textContent = magnetMode === 'strong' ? '🧲!' : '🧲'; });
+    document.querySelectorAll('.pTools [data-act="stay"]').forEach((b) => b.classList.toggle('on', stayInDraw));
+    document.querySelectorAll('.pTools [data-act="hideall"]').forEach((b) => b.classList.toggle('on', allDrawHidden));
   }
   const drawHooks = {
     tool: () => tool,
     defColor: () => '#2962ff',
+    magnet: () => magnetMode,
+    stay: () => stayInDraw,
+    isRuler: () => rulerMode,
     activate: (p) => { const i = panes.indexOf(p); if (i >= 0 && i !== active) setActive(i); },
     toolDone: () => setTool('cursor'),
-    onSel: (dw) => { if (panes[active] && panes[active].dw === dw) updateObjBar(); },
+    onSel: (dw) => { if (panes[active] && panes[active].dw === dw) { updateObjBar(); renderObjTree(); } },
     onServiceChange: (dw) => { const p = panes.find((x) => x.dw === dw); if (p) saveLevels(p); },
     onServiceRemove: (dw) => { const p = panes.find((x) => x.dw === dw); if (p) saveLevels(p); },
   };
   function setTool(t) {
     if (t !== 'cursor' && rulerMode) setRuler(false);
-    tool = t; document.querySelectorAll('.pTools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
+    tool = t;
+    document.querySelectorAll('.pTools [data-tool="cursor"]').forEach((b) => b.classList.toggle('on', t === 'cursor'));
+    document.querySelectorAll('.pTools .pt-pop .mi').forEach((m) => m.classList.toggle('on', m.dataset.tool === t));
+    document.querySelectorAll('.pTools .pt-grp').forEach((g) => {
+      const has = !!g.querySelector(`.mi[data-tool="${t}"]`);
+      g.querySelector('.pt-gbtn').classList.toggle('on', has);
+      if (has) g.querySelector('.pt-gbtn').textContent = TOOL_GLYPHS[t];
+    });
     panes.forEach((p) => { if (t === 'cursor') p.dw.creating = null; p.cv.style.cursor = t === 'cursor' ? '' : 'crosshair'; p.dw.request(); });
   }
   function setRuler(on) {
@@ -1070,21 +1195,104 @@
     const o = panes[active] && panes[active].dw.selected(), bar = $('#objBar');
     bar.classList.toggle('hidden', !o);
     if (!o) return;
+    const st = o.style || {}, isSvc = o.id < 0, locked = !!st.locked;
     panes[active].el.appendChild(bar);
-    $('#objName').textContent = PMTDraw.NAMES[o.type]; $('#objColor').value = PMTDraw.colorOf(o); $('#objWidth').value = o.style.width || 1;
+    $('#objName').textContent = PMTDraw.NAMES[o.type] || o.type;
+    $('#objColor').value = PMTDraw.colorOf(o);
+    $('#objWidth').value = st.width || 1;
+    $('#objDash').value = st.dash || 'solid';
+    $('#objAlpha').value = Math.round((st.fillAlpha !== undefined ? st.fillAlpha : 0.14) * 100);
+    $('#objAlpha').classList.toggle('hidden', !['rect', 'ellipse', 'channel', 'callout', 'pricerange', 'daterange'].includes(o.type));
+    $('#objLock').textContent = locked ? '🔒' : '🔓';
+    $('#objLock').classList.toggle('hidden', isSvc);
+    $('#objClone').classList.toggle('hidden', isSvc);
+    $('#objColor').disabled = $('#objWidth').disabled = $('#objDash').disabled = $('#objAlpha').disabled = locked;
+  }
+  function renderObjTree() {
+    const host = $('#objTree'); if (!host || !panes[active]) return;
+    const p = panes[active];
+    let html = `<div class="ot-sec">Индикаторы (${p.cfg.indicators.length})</div>`;
+    if (!p.cfg.indicators.length) html += '<div style="padding:6px 8px;color:var(--mut)">Нет индикаторов</div>';
+    for (const inst of p.cfg.indicators) {
+      const def = inst.type === 'mql' ? null : PMTInd.REG[inst.type];
+      const name = inst.type === 'mql' ? inst.name : (def ? def.name : inst.type);
+      const vis = inst.visible !== false;
+      html += `<div class="ot-row${vis ? '' : ' hid'}"><span class="ot-lbl">${esc(name)}</span><span class="ot-acts"><button data-ot-ind="vis" data-u="${inst.uid}">${vis ? '👁' : '🚫'}</button><button data-ot-ind="cfg" data-u="${inst.uid}">⚙</button><button data-ot-ind="del" data-u="${inst.uid}">✕</button></span></div>`;
+    }
+    if (p.cfg.compares && p.cfg.compares.length) {
+      html += `<div class="ot-sec">Сравнения (${p.cfg.compares.length})</div>`;
+      p.cfg.compares.forEach((cm, idx) => {
+        html += `<div class="ot-row"><span class="ot-lbl" style="color:${cm.color}">⊕ ${esc(cm.symbol)}</span><span class="ot-acts"><button data-ot-cmp="${idx}">✕</button></span></div>`;
+      });
+    }
+    const objs = p.dw.objs;
+    html += `<div class="ot-sec">Рисунки · ${esc(p.cfg.symbol)} (${objs.length})</div>`;
+    if (!objs.length) html += '<div style="padding:6px 8px;color:var(--mut)">Нет объектов</div>';
+    for (let i = objs.length - 1; i >= 0; i--) {
+      const o = objs[i], st = o.style || {}, sel = p.dw.sel === o.id;
+      const lbl = `${TOOL_GLYPHS[o.type] || ''} ${PMTDraw.NAMES[o.type] || o.type}${st.text ? ' · ' + st.text : ''}`;
+      html += `<div class="ot-row${sel ? ' sel' : ''}${st.hidden ? ' hid' : ''}" data-ot-id="${o.id}"><span class="ot-lbl">${esc(lbl)}</span><span class="ot-acts"><button data-ot-dw="up" data-oid="${o.id}" title="Выше">↑</button><button data-ot-dw="down" data-oid="${o.id}" title="Ниже">↓</button><button data-ot-dw="lock" data-oid="${o.id}" title="Блок">${st.locked ? '🔒' : '🔓'}</button><button data-ot-dw="hide" data-oid="${o.id}" title="Скрыть">${st.hidden ? '🚫' : '👁'}</button><button data-ot-dw="del" data-oid="${o.id}" title="Удалить">✕</button></span></div>`;
+    }
+    host.innerHTML = html;
   }
   function wireTools() {
     document.addEventListener('mousedown', (e) => {
       if (!e.target.closest('.tfdd')) document.querySelectorAll('.tfdd .tfm').forEach((m) => m.classList.add('hidden'));
       if (!e.target.closest('.popwrap')) document.querySelectorAll('.popmenu').forEach((m) => m.classList.add('hidden'));
+      if (!e.target.closest('.pt-grp')) document.querySelectorAll('.pt-pop').forEach((m) => m.classList.add('hidden'));
     });
-    $('#objColor').oninput = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.color = e.target.value; panes[active].dw.save(); panes[active].dw.request(); } };
-    $('#objWidth').onchange = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.width = Math.min(6, Math.max(1, +e.target.value || 1)); panes[active].dw.save(); panes[active].dw.request(); } };
-    $('#objDel').onclick = () => { panes[active].dw.remove(); };
+    const mutStyle = (fn) => { const p = panes[active], o = p.dw.selected(); if (!o || (o.style && o.style.locked)) return; p.dw.snapshot(); fn(o.style = o.style || {}); p.dw.save(); p.dw.request(); };
+    $('#objColor').oninput = (e) => mutStyle((st) => { st.color = e.target.value; });
+    $('#objWidth').onchange = (e) => mutStyle((st) => { st.width = Math.min(6, Math.max(1, +e.target.value || 1)); });
+    $('#objDash').onchange = (e) => mutStyle((st) => { st.dash = e.target.value; });
+    $('#objAlpha').oninput = (e) => mutStyle((st) => { st.fillAlpha = (+e.target.value || 0) / 100; });
+    $('#objLock').onclick = () => { const p = panes[active], o = p.dw.selected(); if (!o || o.id < 0) return; p.dw.snapshot(); o.style = o.style || {}; o.style.locked = !o.style.locked; p.dw.save(); p.dw.request(); };
+    $('#objClone').onclick = () => { panes[active] && panes[active].dw.cloneSelected(); };
+    $('#objDel').onclick = () => { const r = panes[active].dw.remove(); if (r === 'locked') PMTUx.toast('Объект заблокирован', 'err'); };
     window.addEventListener('keydown', (e) => {
       if (/INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''))) return;
-      if (e.key === 'Delete' || e.key === 'Backspace') panes[active].dw.remove();
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const r = panes[active].dw.remove();
+        if (r === 'locked') PMTUx.toast('Объект заблокирован', 'err');
+      }
     });
+    // sidebar tabs & Object Tree events
+    const setSideTab = (tab) => {
+      $('#tabWatch').classList.toggle('on', tab === 'watch');
+      $('#tabObj').classList.toggle('on', tab === 'obj');
+      $('#watchPan').classList.toggle('hidden', tab !== 'watch');
+      $('#objTreePan').classList.toggle('hidden', tab !== 'obj');
+      if (tab === 'obj') renderObjTree();
+    };
+    $('#tabWatch').onclick = () => setSideTab('watch');
+    $('#tabObj').onclick = () => setSideTab('obj');
+    $('#objTree').onclick = (e) => {
+      const p = panes[active]; if (!p) return;
+      const cmp = e.target.closest('[data-ot-cmp]');
+      if (cmp) { p.cfg.compares.splice(+cmp.dataset.otCmp, 1); save(); p.syncCompares(); renderObjTree(); return; }
+      const ib = e.target.closest('[data-ot-ind]');
+      if (ib) {
+        const inst = p.cfg.indicators.find((x) => x.uid === ib.dataset.u); if (!inst) return;
+        const a = ib.dataset.otInd;
+        if (a === 'vis') { inst.visible = inst.visible === false; p.changeInd(); save(); }
+        else if (a === 'cfg') openIndForUid(inst.uid);
+        else if (a === 'del') { p.cfg.indicators = p.cfg.indicators.filter((x) => x.uid !== inst.uid); p.changeInd(); save(); }
+        return;
+      }
+      const db = e.target.closest('[data-ot-dw]');
+      if (db) {
+        e.stopPropagation();
+        const oid = +db.dataset.oid, a = db.dataset.otDw, o = p.dw.objs.find((x) => x.id === oid);
+        if (!o) return;
+        if (a === 'up' || a === 'down') p.dw.moveOrder(oid, a);
+        else if (a === 'lock') { p.dw.snapshot(); o.style = o.style || {}; o.style.locked = !o.style.locked; p.dw.save(); p.dw.request(); }
+        else if (a === 'hide') { p.dw.snapshot(); o.style = o.style || {}; o.style.hidden = !o.style.hidden; p.dw.save(); p.dw.request(); }
+        else if (a === 'del') { const r = p.dw.remove(oid); if (r === 'locked') PMTUx.toast('Объект заблокирован', 'err'); }
+        return;
+      }
+      const row = e.target.closest('[data-ot-id]');
+      if (row) p.dw.select(+row.dataset.otId);
+    };
   }
 
   // ---------- MQL library dialog ----------
@@ -1275,19 +1483,61 @@ if showLabels and ta.crossunder(close, ma)
     };
   }
 
-  // ---------- indicators dialog & templates ----------
+  // ---------- indicators catalog dialog & templates ----------
   const tplAll = () => store.get('tpl', {});
+  let indTab = 'all', userScriptsCache = null;
   function openIndForUid(uid) {
+    indTab = 'active';
     $('#indDlg').classList.remove('hidden');
     renderInd(uid);
+  }
+  async function loadUserScriptsCat() {
+    try { userScriptsCache = (await call('GET', 'mql/scripts')).scripts.filter((s) => s.supported); }
+    catch { userScriptsCache = userScriptsCache || []; }
   }
   function renderInd(focusUid) {
     const p = panes[active];
     $('#indFor').textContent = `— окно ${active + 1}: ${p.cfg.symbol}`;
-    const cats = {};
-    Object.values(PMTInd.REG).forEach((d) => (cats[d.cat] = cats[d.cat] || []).push(d));
-    $('#indAdd').innerHTML = Object.entries(cats).map(([c, l]) => `<optgroup label="${c}">${l.map((d) => `<option value="${d.id}">${d.name}</option>`).join('')}</optgroup>`).join('');
+    $('#indActCnt').textContent = String(p.cfg.indicators.length);
+    document.querySelectorAll('#indTabs button').forEach((b) => b.classList.toggle('on', b.dataset.it === indTab));
     const t = tplAll(); $('#tplSel').innerHTML = '<option value="">— шаблон —</option>' + Object.keys(t).map((k) => `<option>${k.replace(/</g, '&lt;')}</option>`).join('');
+    const showActive = indTab === 'active';
+    $('#indCatalog').classList.toggle('hidden', showActive);
+    $('#indList').classList.toggle('hidden', !showActive);
+
+    if (!showActive) {
+      const q = ($('#indSearch').value || '').trim().toLowerCase();
+      let html = '';
+      if (indTab === 'all' || indTab === 'builtin' || indTab === 'fav') {
+        const cats = {};
+        Object.values(PMTInd.REG).forEach((d) => {
+          if (q && !d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q) && !d.cat.toLowerCase().includes(q)) return;
+          if (indTab === 'fav' && !state.favInds.includes(d.id)) return;
+          (cats[d.cat] = cats[d.cat] || []).push(d);
+        });
+        for (const [cat, list] of Object.entries(cats)) {
+          html += `<div class="icat-sec">${esc(cat)}</div>` + list.map((d) => {
+            const fav = state.favInds.includes(d.id);
+            return `<div class="icat-row" data-add-ind="${d.id}"><div class="icat-l"><button type="button" class="icat-star${fav ? ' on' : ''}" data-fav="${d.id}" title="В избранное">★</button><span>${esc(d.name)}</span></div><span class="icat-tag">${d.overlay ? 'График' : 'Панель'}</span></div>`;
+          }).join('');
+        }
+      }
+      if (indTab === 'all' || indTab === 'scripts' || indTab === 'fav') {
+        const scs = (userScriptsCache || []).filter((s) => {
+          if (q && !s.name.toLowerCase().includes(q) && !s.lang.toLowerCase().includes(q)) return false;
+          if (indTab === 'fav' && !state.favInds.includes('mql:' + s.id)) return false;
+          return true;
+        });
+        if (scs.length) {
+          html += `<div class="icat-sec">Мои скрипты (Pine / MQL)</div>` + scs.map((s) => {
+            const fid = 'mql:' + s.id, fav = state.favInds.includes(fid);
+            return `<div class="icat-row" data-add-mql="${s.id}"><div class="icat-l"><button type="button" class="icat-star${fav ? ' on' : ''}" data-fav="${fid}" title="В избранное">★</button><span>${esc(s.name)}</span></div><span class="icat-tag">${esc(s.lang.toUpperCase())}</span></div>`;
+          }).join('');
+        }
+      }
+      $('#indCatalog').innerHTML = html || '<div style="padding:16px;color:var(--mut)">Ничего не найдено</div>';
+    }
+
     $('#indList').innerHTML = p.cfg.indicators.map((inst) => {
       if (inst.type === 'mql') {
         const ps = (inst.meta && inst.meta.inputs || []).map((q) => { const cur = inst.params[q.name] ?? q.default; return q.kind === 'bool' ? `<label>${esc(q.title || q.name)} <input type="checkbox" ${cur ? 'checked' : ''} data-u="${inst.uid}" data-mp="${q.name}" data-k="bool"></label>` : `<label>${esc(q.title || q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" value="${String(cur).replace(/"/g, '&quot;')}" data-u="${inst.uid}" data-mp="${q.name}" data-k="${q.kind}"></label>`; }).join('');
@@ -1300,7 +1550,7 @@ if showLabels and ta.crossunder(close, ma)
       const cs = d.outputs.map((o) => `<label>${o.label} <input type="color" value="${(inst.style.colors && inst.style.colors[o.k]) || o.color}" data-u="${inst.uid}" data-c="${o.k}"></label>`).join('');
       return `<div class="card" data-card-uid="${inst.uid}"><div class="h"><input type="checkbox" data-u="${inst.uid}" data-vis ${inst.visible !== false ? 'checked' : ''} title="Показать/скрыть"><span>${d.name}</span><span class="grow"></span><button data-u="${inst.uid}" data-del>Удалить</button></div>
         <div>${ps}</div><div>${cs}<label>Толщина <input type="number" min="1" max="5" value="${inst.style.width || 1}" data-u="${inst.uid}" data-w></label></div></div>`;
-    }).join('') || '<div style="color:var(--mut)">Нет индикаторов. Выберите из списка и нажмите «Добавить».</div>';
+    }).join('') || '<div style="padding:16px;color:var(--mut)">На активном графике нет индикаторов.</div>';
     if (focusUid) {
       const card = document.querySelector(`.card[data-card-uid="${focusUid}"]`);
       if (card) { card.scrollIntoView({ block: 'center' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1500); }
@@ -1317,10 +1567,47 @@ if showLabels and ta.crossunder(close, ma)
     p.changeInd(); save();
   }
   function wireIndicators() {
-    $('#btnInd').onclick = () => { $('#indDlg').classList.remove('hidden'); renderInd(); };
+    $('#btnInd').onclick = async () => {
+      if (indTab === 'active' && !panes[active].cfg.indicators.length) indTab = 'all';
+      $('#indDlg').classList.remove('hidden');
+      $('#indSearch').value = '';
+      renderInd();
+      $('#indSearch').focus();
+      await loadUserScriptsCat();
+      if (!$('#indDlg').classList.contains('hidden')) renderInd();
+    };
     $('#indClose').onclick = () => $('#indDlg').classList.add('hidden');
     $('#indDlg').onmousedown = (e) => { if (e.target.id === 'indDlg') $('#indDlg').classList.add('hidden'); };
-    $('#indAddBtn').onclick = () => { panes[active].addInd($('#indAdd').value); save(); renderInd(); };
+    $('#indSearch').oninput = () => { if (indTab === 'active') indTab = 'all'; renderInd(); };
+    $('#indTabs').onclick = (e) => { const b = e.target.closest('button'); if (b) { indTab = b.dataset.it; renderInd(); } };
+    $('#indCatalog').onclick = async (e) => {
+      const fav = e.target.closest('[data-fav]');
+      if (fav) {
+        e.stopPropagation();
+        const id = fav.dataset.fav, i = state.favInds.indexOf(id);
+        if (i >= 0) state.favInds.splice(i, 1); else state.favInds.push(id);
+        save(); renderInd(); return;
+      }
+      const addB = e.target.closest('[data-add-ind]');
+      if (addB) {
+        const id = addB.dataset.addInd;
+        panes[active].addInd(id); save(); renderInd();
+        PMTUx.toast('Добавлено: ' + PMTInd.REG[id].name, 'ok');
+        return;
+      }
+      const addM = e.target.closest('[data-add-mql]');
+      if (addM) {
+        const sid = +addM.dataset.addMql;
+        const sc = (userScriptsCache || []).find((x) => x.id === sid);
+        if (!sc) return;
+        const d = await call('POST', `mql/scripts/${sid}/describe`).catch(() => null);
+        if (!d || !d.ok) { PMTUx.toast('Ошибка скрипта: ' + (d ? d.error : 'сервис недоступен'), 'err'); return; }
+        const params = Object.fromEntries((d.info.inputs || []).map((q) => [q.name, q.default]));
+        panes[active].cfg.indicators.push({ uid: Date.now() + '' + Math.floor(Math.random() * 1000), type: 'mql', scriptId: sid, name: sc.name, params, meta: { inputs: d.info.inputs || [] }, visible: true });
+        save(); panes[active].refreshIndicators(true); panes[active].cross(null); renderInd();
+        PMTUx.toast('Добавлено: ' + sc.name, 'ok');
+      }
+    };
     $('#indList').onchange = indEvent;
     $('#indList').onclick = (e) => {
       if (!('del' in (e.target.dataset || {}))) return;
@@ -1372,6 +1659,9 @@ if showLabels and ta.crossunder(close, ma)
       setTool,
       toggleRuler: () => setRuler(!rulerMode),
       quickAlert: () => $('#btnLevels').click(),
+      undo: () => { if (panes[active] && !panes[active].dw.undo()) PMTUx.toast('Нечего отменять'); },
+      redo: () => { if (panes[active] && !panes[active].dw.redo()) PMTUx.toast('Нечего повторять'); },
+      clone: () => { panes[active] && panes[active].dw.cloneSelected(); },
       onEsc: () => {
         if (rulerMode) setRuler(false);
         panes.forEach((p) => { p.dw.cancel(); p.ruler.clear(); });

@@ -30,9 +30,19 @@ for (const id of Object.keys(REG)) {
     assert.ok(v.some((x) => x !== null), `${id}.${o.k} all null`);
   }
   // look-ahead check: values at index i must not change when future candles are removed
-  if (!['fibo', 'vprofile', 'structure', 'sr'].includes(id)) {
+  if (!['fibo', 'vprofile', 'structure', 'sr', 'zigzag'].includes(id)) {
     const cut = data.slice(0, 400), a = r.calc(cut, p);
-    for (const o of r.outputs) for (let i = 0; i < 400; i++) { const x = out[o.k][i], y = a[o.k][i]; assert.ok((x === null && y === null) || Math.abs(x - y) < 1e-9, `look-ahead in ${id}.${o.k}@${i}`); }
+    for (const o of r.outputs) {
+      if (o.type === 'levels' || o.type === 'markers') continue;
+      for (let i = 0; i < 400; i++) { const x = out[o.k][i], y = a[o.k][i]; assert.ok((x === null && y === null) || Math.abs(x - y) < 1e-9, `look-ahead in ${id}.${o.k}@${i}`); }
+    }
+    if (out.bg) for (let i = 0; i < 400; i++) assert.strictEqual(out.bg[i], a.bg[i], `look-ahead in ${id}.bg@${i}`);
   }
 }
+// Verify clouds metadata & VRVP histogram bins
+assert.ok(Array.isArray(REG.ichimoku.clouds) && REG.ichimoku.clouds.length === 1);
+assert.ok(Array.isArray(REG.bb.clouds) && REG.bb.clouds.length === 1);
+const vp = REG.vprofile.calc(data, defaults('vprofile'), { from: 100, to: 300 });
+assert.ok(vp.profile && vp.profile.bins.length === 24 && vp.profile.pocIdx >= 0);
+assert.ok(Object.keys(REG).length >= 39, 'expected >= 39 indicators');
 console.log('OK:', Object.keys(REG).length, 'indicators');

@@ -272,6 +272,36 @@
     document.addEventListener('keydown', chartMenuEsc);
   }
 
+  function showDrawingMenu(pane, obj, clientX, clientY, hooks) {
+    hideChartMenu();
+    const st = obj.style || {};
+    const mi = (a, label, key = '') => `<div class="mi" data-a="${a}"><span>${label}</span>${key ? `<small>${key}</small>` : ''}</div>`;
+    const m = document.createElement('div');
+    m.className = 'ctxmenu';
+    m.innerHTML = mi('clone', 'Клонировать', 'Ctrl+D')
+      + mi('lock', st.locked ? 'Разблокировать' : 'Заблокировать')
+      + mi('hide', st.hidden ? 'Показать' : 'Скрыть')
+      + '<div class="msep"></div>'
+      + mi('front', 'На передний план')
+      + mi('back', 'На задний план')
+      + (['text', 'callout', 'hline', 'hray', 'trend', 'rect'].includes(obj.type) ? mi('text', 'Редактировать текст') : '')
+      + '<div class="msep"></div>'
+      + mi('del', 'Удалить', 'Del');
+    document.body.appendChild(m);
+    m.style.left = Math.min(clientX, window.innerWidth - m.offsetWidth - 8) + 'px';
+    m.style.top = Math.min(clientY, window.innerHeight - m.offsetHeight - 8) + 'px';
+    chartMenu = m;
+    m.onclick = () => {};
+    m.addEventListener('click', (e) => {
+      const b = e.target.closest('.mi'); if (!b) return;
+      const a = b.dataset.a;
+      hideChartMenu();
+      hooks.onDrawingAction(pane, obj, a);
+    });
+    setTimeout(() => document.addEventListener('mousedown', hideChartMenu, { once: true }), 0);
+    document.addEventListener('keydown', chartMenuEsc);
+  }
+
   // ---------- Screenshot ----------
   async function takeScreenshot(pane) {
     try {
@@ -326,11 +356,17 @@
           if (top.id !== 'authDlg') top.classList.add('hidden');
           return;
         }
-        document.querySelectorAll('.popmenu').forEach((m) => m.classList.add('hidden'));
+        document.querySelectorAll('.popmenu,.pt-pop').forEach((m) => m.classList.add('hidden'));
         hooks.onEsc();
         return;
       }
       if (dlgOpen || inInput) return;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === 'z' && !e.shiftKey) { e.preventDefault(); hooks.undo && hooks.undo(); return; }
+        if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); hooks.redo && hooks.redo(); return; }
+        if (k === 'd') { e.preventDefault(); hooks.clone && hooks.clone(); return; }
+      }
       if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault(); hooks.openSearch(''); return;
       }
@@ -351,5 +387,5 @@
     });
   }
 
-  window.PMTUx = { toast, Ruler, wireSymbolSearch, openSymbolSearch, openGoToDate, showChartMenu, hideChartMenu, takeScreenshot, wireKeyboard };
+  window.PMTUx = { toast, Ruler, wireSymbolSearch, openSymbolSearch, openGoToDate, showChartMenu, showDrawingMenu, hideChartMenu, takeScreenshot, wireKeyboard };
 })();
