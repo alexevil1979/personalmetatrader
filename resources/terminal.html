@@ -110,21 +110,29 @@
   <div id="authLinks"></div><div id="authMsg"></div>
 </div></div>
 
-<div id="setDlg" class="dlg hidden"><div class="dlgbox authbox" style="width:420px">
-  <div class="dlghead"><b>Настройки</b><button id="setClose">✕</button></div>
-  <details open><summary>Профиль</summary>
-    <div style="color:var(--mut);margin:6px 0">Аккаунт: <b id="setEmail"></b></div>
-    <input id="setPass1" type="password" placeholder="Новый пароль (от 10 символов)" autocomplete="new-password">
-    <input id="setPass2" type="password" placeholder="Повторите пароль" autocomplete="new-password">
-    <button id="setPassGo" class="on">Сменить пароль</button>
-  </details>
-  <details open><summary>Уведомления — Telegram</summary>
-    <div style="color:var(--mut);margin:6px 0">Токен бота от @BotFather и ID чата (узнать: напишите боту любое сообщение, затем «Проверить»).</div>
-    <input id="setTgToken" placeholder="Токен бота (123456:ABC-DEF...)">
-    <input id="setTgChat" placeholder="ID чата (например 123456789)">
-    <button id="setTgGo" class="on">Сохранить</button>
-    <button id="setTgTest" title="Отправить тестовое сообщение">Проверить</button>
-  </details>
+<div id="setDlg" class="dlg hidden"><div class="dlgbox setbox">
+  <div class="sethead"><div class="settitle">⚙ Настройки</div><button id="setClose" class="setx" title="Закрыть">✕</button></div>
+  <div class="settabs">
+    <button id="setTabProfile" class="settab on">Профиль</button>
+    <button id="setTabNotify" class="settab">Уведомления</button>
+  </div>
+  <div id="setPanProfile" class="setpan">
+    <div class="setacct"><div class="setava" id="setAva">A</div><div><div class="setemail" id="setEmail"></div><div class="setsub">Ваша учётная запись</div></div></div>
+    <div class="setsec">Смена пароля</div>
+    <label class="setlab" for="setPass1">Новый пароль<span class="sethint">от 10 символов</span></label>
+    <div class="setpass"><input id="setPass1" type="password" placeholder="Введите новый пароль" autocomplete="new-password"><button class="seteye" data-for="#setPass1" title="Показать/скрыть">👁</button></div>
+    <label class="setlab" for="setPass2">Повторите пароль</label>
+    <div class="setpass"><input id="setPass2" type="password" placeholder="Ещё раз" autocomplete="new-password"><button class="seteye" data-for="#setPass2" title="Показать/скрыть">👁</button></div>
+    <div class="setbtns"><button id="setPassGo" class="btnpri">Сменить пароль</button></div>
+  </div>
+  <div id="setPanNotify" class="setpan hidden">
+    <div class="setnote">При пробое ценовых уровней («⇕ Уровни» на графике) придёт сообщение в Telegram. Токен возьмите у @BotFather. Чтобы узнать ID чата, напишите вашему боту любое сообщение и нажмите «Проверить».</div>
+    <label class="setlab" for="setTgToken">Токен бота</label>
+    <input id="setTgToken" placeholder="123456:ABC-DEF..." autocomplete="off">
+    <label class="setlab" for="setTgChat">ID чата</label>
+    <input id="setTgChat" placeholder="например 123456789" autocomplete="off">
+    <div class="setbtns"><button id="setTgGo" class="btnpri">Сохранить</button><button id="setTgTest" class="btnsec">Проверить</button></div>
+  </div>
   <div id="setMsg"></div>
 </div></div>
 

@@ -129,26 +129,41 @@
   // ---------- settings dialog (profile + notifications) ----------
   function wireSettings() {
     const dlg = $('#setDlg'), msg = $('#setMsg');
-    const say = (s) => (msg.textContent = s);
+    const say = (s, ok) => { msg.textContent = s; msg.className = s ? (ok ? 'ok' : 'err') : ''; };
+    const tab = (id) => {
+      $('#setTabProfile').classList.toggle('on', id === 'profile');
+      $('#setTabNotify').classList.toggle('on', id === 'notify');
+      $('#setPanProfile').classList.toggle('hidden', id !== 'profile');
+      $('#setPanNotify').classList.toggle('hidden', id !== 'notify');
+      say('');
+    };
+    $('#setTabProfile').onclick = () => tab('profile');
+    $('#setTabNotify').onclick = () => tab('notify');
     $('#btnSettings').onclick = async () => {
-      dlg.classList.remove('hidden'); say('');
-      $('#setEmail').textContent = $('#userEmail').textContent;
+      dlg.classList.remove('hidden'); tab('profile');
+      const email = $('#userEmail').textContent;
+      $('#setEmail').textContent = email;
+      $('#setAva').textContent = (email[0] || '?').toUpperCase();
       try { const j = await call('GET', 'notify'); $('#setTgToken').value = j.telegram_token || ''; $('#setTgChat').value = j.telegram_chat || ''; } catch { /* leave empty */ }
     };
     $('#setClose').onclick = () => dlg.classList.add('hidden');
     dlg.onmousedown = (e) => { if (e.target === dlg) dlg.classList.add('hidden'); };
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !dlg.classList.contains('hidden')) { e.stopPropagation(); dlg.classList.add('hidden'); } });
+    document.querySelectorAll('#setDlg .seteye').forEach((b) => {
+      b.onclick = () => { const i = $(b.dataset.for); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; b.textContent = show ? '🙈' : '👁'; };
+    });
     $('#setPassGo').onclick = async () => {
       const p1 = $('#setPass1').value, p2 = $('#setPass2').value;
       if (p1 !== p2) { say('Пароли не совпадают'); return; }
       if (p1.length < 10) { say('Пароль: от 10 символов'); return; }
-      try { await call('POST', 'auth/password', null, { password: p1 }); $('#setPass1').value = $('#setPass2').value = ''; say('Пароль изменён'); } catch (e) { say(e.message); }
+      try { await call('POST', 'auth/password', null, { password: p1 }); $('#setPass1').value = $('#setPass2').value = ''; say('Пароль изменён', true); } catch (e) { say(e.message); }
     };
     $('#setTgGo').onclick = async () => {
-      try { await call('PUT', 'notify', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim() }); say('Сохранено'); } catch (e) { say(e.message); }
+      try { await call('PUT', 'notify', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim() }); say('Сохранено', true); } catch (e) { say(e.message); }
     };
     $('#setTgTest').onclick = async () => {
       say('Отправляю…');
-      try { await call('POST', 'notify/test', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim() }); say('Отправлено — проверьте Telegram'); } catch (e) { say(e.message); }
+      try { await call('POST', 'notify/test', null, { telegram_token: $('#setTgToken').value.trim(), telegram_chat: $('#setTgChat').value.trim() }); say('Отправлено — проверьте Telegram', true); } catch (e) { say(e.message); }
     };
   }
 

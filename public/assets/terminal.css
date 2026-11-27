@@ -61,6 +61,38 @@ main{flex:1;display:flex;min-height:0}
 .authbox input{padding:8px}.authbox button{padding:8px}
 #authLinks{display:flex;gap:14px}#authLinks a{color:var(--acc);cursor:pointer}
 #authMsg{color:var(--dn);min-height:16px}
+/* ---------- settings dialog ---------- */
+.setbox{width:min(440px,94vw);padding:0;border-radius:10px;overflow:hidden}
+.sethead{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--line)}
+.settitle{font-size:14px;font-weight:700}
+.setx{background:transparent;border:none;color:var(--mut);font-size:13px;padding:4px 9px;border-radius:6px}
+.setx:hover{background:var(--bg);color:var(--txt);border-color:transparent}
+.settabs{display:flex;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--line)}
+.settab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);padding:8px 14px;border-radius:6px 6px 0 0;font-weight:600}
+.settab:hover{color:var(--txt);border-color:transparent}
+.settab.on{color:var(--txt);border-bottom-color:var(--acc)}
+.setpan{padding:16px 18px 6px;display:flex;flex-direction:column;gap:9px}
+.setacct{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+.setava{width:34px;height:34px;border-radius:50%;background:var(--acc);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex:none}
+.setemail{font-weight:600}
+.setsub{color:var(--mut);font-size:11px}
+.setsec{font-weight:700;margin-top:4px}
+.setlab{color:var(--mut);font-size:11px;display:flex;justify-content:space-between;align-items:baseline}
+.sethint{font-weight:400;opacity:.75}
+.setbox input{padding:8px 10px;border-radius:6px}
+.setbox input:focus{outline:none;border-color:var(--acc)}
+.setpass{position:relative}
+.setpass input{width:100%;padding-right:34px}
+.seteye{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:var(--mut);padding:2px 6px}
+.seteye:hover{background:transparent;border-color:transparent;color:var(--txt)}
+.setbtns{display:flex;gap:8px;margin-top:2px}
+.btnpri{background:var(--acc);border-color:var(--acc);color:#fff;padding:8px 14px;border-radius:6px;font-weight:600}
+.btnpri:hover{background:var(--acc);border-color:var(--acc);color:#fff;filter:brightness(1.15)}
+.btnsec{padding:8px 14px;border-radius:6px}
+.setnote{color:var(--mut);font-size:11px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+#setMsg{padding:0 18px;min-height:26px;font-size:12px;display:flex;align-items:center}
+#setMsg.ok{color:var(--up)}
+#setMsg.err{color:var(--dn)}
 #userBox{display:flex;align-items:center;gap:6px;color:var(--mut)}
 .mqlbox{width:min(1000px,97vw);height:82vh;display:flex;flex-direction:column;margin-top:-30px}
 .mqlcols{display:flex;gap:8px;flex:1;min-height:0}
