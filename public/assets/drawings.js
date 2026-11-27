@@ -11,7 +11,7 @@
     fibret: 2, fibext: 3, fibfan: 2, fibtime: 2, pitchfork: 3,
     text: 1, callout: 2, arrow: 2, pricelabel: 1, pencil: 2,
     longpos: 3, shortpos: 3, pricerange: 2, daterange: 2, avwap: 1,
-    levelup: 1, leveldn: 1,
+    levelup: 1, leveldn: 1, alertline: 1,
   };
   const NAMES = {
     hline: 'Горизонтальная линия', hray: 'Горизонтальный луч', vline: 'Вертикальная линия',
@@ -22,7 +22,7 @@
     pencil: 'Карандаш — свободная линия',
     longpos: 'Длинная позиция (R:R)', shortpos: 'Короткая позиция (R:R)',
     pricerange: 'Ценовой диапазон', daterange: 'Диапазон дат', avwap: 'Anchored VWAP',
-    levelup: 'Верхний уровень (уведомление)', leveldn: 'Нижний уровень (уведомление)',
+    levelup: 'Верхний уровень (уведомление)', leveldn: 'Нижний уровень (уведомление)', alertline: 'Ценовой алерт',
   };
   const DEF_COLOR = {
     fibret: '#ff9800', fibext: '#ff9800', fibfan: '#ff9800', fibtime: '#ff9800',
@@ -30,10 +30,10 @@
     arrow: '#ffeb3b', text: '#d1d4dc', callout: '#2962ff', pricelabel: '#26a69a',
     pencil: '#26a69a', infoline: '#2962ff', extline: '#2962ff', hray: '#2962ff',
     longpos: '#26a69a', shortpos: '#ef5350', pricerange: '#2962ff', daterange: '#2962ff', avwap: '#e91e63',
-    levelup: '#ef5350', leveldn: '#26a69a',
+    levelup: '#ef5350', leveldn: '#26a69a', alertline: '#ffb300',
   };
   const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-  const SERVICE = ['levelup', 'leveldn'];
+  const SERVICE = ['levelup', 'leveldn', 'alertline'];
   const colorOf = (o) => (o.style && o.style.color) || DEF_COLOR[o.type] || '#2962ff';
 
   const far = (a, b, W, H) => { const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, k = (W + H) * 3 / len; return { x: a.x + dx * k, y: a.y + dy * k }; };
@@ -56,6 +56,10 @@
       case 'leveldn':
         L.push(seg({ x: 0, y: a.y }, { x: W, y: a.y }));
         T.push({ x: W - 4, y: a.y - 3, s: (st.text ? st.text + ' ' : '') + o.pts[0].p.toFixed(E.prec), align: 'right' });
+        break;
+      case 'alertline':
+        L.push(seg({ x: 0, y: a.y }, { x: W, y: a.y }, true));
+        T.push({ x: W - 6, y: a.y - 4, s: '🔔 ' + (st.text ? st.text + ' ' : '') + o.pts[0].p.toFixed(E.prec), align: 'right', pill: true, color: st.color || '#ffb300' });
         break;
       case 'hray':
         L.push(seg(a, { x: Math.max(W, a.x + 20), y: a.y }));

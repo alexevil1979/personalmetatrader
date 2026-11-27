@@ -36,6 +36,10 @@ shapeFn('plotshape', ['series', 'title', 'style', 'location', 'color', 'offset',
 shapeFn('plotchar', ['series', 'title', 'char', 'location', 'color', 'offset', 'text', 'textcolor', 'editable', 'size', 'show_last', 'display']);
 reg('color', ['c'], {}, () => (s, a) => (typeof a[0] === 'string' ? a[0] : 'rgba(0,0,0,0)')); // color(na) -> fully transparent
 reg('bgcolor', ['color', 'offset', 'editable', 'show_last', 'title', 'display'], {}, (P) => (s, a, n) => { const c = n.color !== undefined ? n.color : a[0]; if (typeof c === 'string') P.out.bg[P.C.i] = c; });
+reg('barcolor', ['color', 'offset', 'editable', 'show_last', 'title', 'display'], {}, (P) => (s, a, n) => {
+  const c = n.color !== undefined ? n.color : a[0], off = Math.trunc(val(n.offset !== undefined ? n.offset : a[1]) || 0);
+  if (typeof c === 'string' && P.C.i + off >= 0) P.out.barcolors[P.C.i + off] = c;
+});
 reg('hline', ['price', 'title', 'color', 'linestyle', 'linewidth'], {}, (P) => (s, a, n) => {
   let found = P.out.hlines.find((h) => h.site === s);
   if (!found) {

@@ -175,7 +175,14 @@ function generate(src) {
     if (st.k === 'decl' && st.e.k === 'call' && ((pathOf(st.e.fn) || '').startsWith('input.') || pathOf(st.e.fn) === 'input')) {
       const d0 = st.e.args[0], t = pathOf(st.e.fn) === 'input' ? (d0 && d0.k === 'bool' ? 'bool' : d0 && d0.k === 'num' ? 'float' : d0 && d0.k === 'str' ? 'string' : 'source') : pathOf(st.e.fn).slice(6), nm = st.e.named;
       if (t === 'source' || t === 'color') continue; // not editable in the form (no literal default)
-      meta.inputs.push({ name: st.name, title: lit(nm.title) ?? lit(st.e.args[1]) ?? st.name, type: t, kind: { int: 'int', float: 'double', bool: 'bool' }[t] || 'string', default: lit(nm.defval) ?? lit(st.e.args[0]), group: lit(nm.group), min: lit(nm.minval), max: lit(nm.maxval) });
+      const opts = nm.options && nm.options.k === 'tupleLit' ? nm.options.items.map(lit).filter((v) => v !== undefined) : undefined;
+      meta.inputs.push({
+        name: st.name, title: lit(nm.title) ?? lit(st.e.args[1]) ?? st.name, type: t,
+        kind: { int: 'int', float: 'double', bool: 'bool' }[t] || 'string',
+        default: lit(nm.defval) ?? lit(st.e.args[0]),
+        group: lit(nm.group), min: lit(nm.minval), max: lit(nm.maxval),
+        step: lit(nm.step), tooltip: lit(nm.tooltip), options: opts && opts.length ? opts : undefined,
+      });
     }
     if (st.k === 'expr' && st.e.k === 'call' && /^(indicator|strategy)$/.test(pathOf(st.e.fn) || '')) { meta.indicator = { title: lit(st.e.args[0]) ?? lit(st.e.named.title), overlay: lit(st.e.named.overlay) === true }; if (pathOf(st.e.fn) === 'strategy') meta.isStrategy = true; }
     if (st.k === 'expr' && st.e.k === 'call' && pathOf(st.e.fn) === 'library') err('library() scripts are not supported', st.line);

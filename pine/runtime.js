@@ -39,7 +39,7 @@ function makeP(env) {
   const P = {
     env, C, n: 0, limit: 6e7, lim() { throw new Error('execution limit exceeded (too many loop iterations)'); },
     sites: [], userSeries: [], tmps: new Set(), inputs: [], ind: { title: 'Pine script', overlay: false, maxLabels: 50, maxLines: 50, maxBoxes: 50 },
-    broker: null, out: { plots: {}, shapes: [], bg: [], hlines: [], fills: [], labels: [], lines: [], boxes: [], tables: [] }, logs: [], timenow: Date.now(), k: Object.create(null), f: Object.create(null),
+    broker: null, out: { plots: {}, shapes: [], bg: [], hlines: [], fills: [], labels: [], lines: [], boxes: [], tables: [], alerts: [], barcolors: [] }, logs: [], timenow: Date.now(), k: Object.create(null), f: Object.create(null),
     site(id) { return this.sites[id] || (this.sites[id] = {}); },
     sv(isVar) { const s = new Series(C, isVar); this.userSeries.push(s); return s; },
     tmp(id, v) { const st = this.site(id); if (!st.s) st.s = new Series(C, false); st.s.cur = v; this.tmps.add(st.s); return st.s; },

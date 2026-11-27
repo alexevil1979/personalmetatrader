@@ -68,8 +68,9 @@
   <select id="theme" title="Тема"><option value="dark">Тёмная</option><option value="light">Светлая</option></select>
   <span class="grow"></span>
   <button id="btnTest" title="Тестер стратегий (Pine strategy)">Тестер</button>
-  <button id="btnMql" title="Скрипты и индикаторы MQL4/MQL5">MQL</button>
+  <button id="btnMql" title="Редактор Pine Script и MQL4/MQL5">&lt;/&gt; Редактор</button>
   <button id="btnInd" title="Индикаторы">ƒ Индикаторы</button>
+  <button id="btnAlert" title="Создать алерт (Alt+A)">🔔 Алерт</button>
   <button id="btnLevels" title="Поставить два уровня уведомлений: выше и ниже текущей цены (±1%)">⇕ Уровни</button>
   <button id="btnSettings" title="Настройки: профиль и уведомления">⚙ Настройки</button>
   <button id="togWatch" class="on" title="Обзор рынка">Обзор</button>
@@ -85,6 +86,7 @@
       <div class="side-tabs">
         <button id="tabWatch" class="on">Обзор</button>
         <button id="tabObj">Объекты</button>
+        <button id="tabAlerts">Алерты</button>
       </div>
       <button id="watchClose" title="Скрыть панель (кнопка «Обзор» в шапке вернёт её)">✕</button>
     </div>
@@ -95,8 +97,67 @@
     <div id="objTreePan" class="hidden">
       <div id="objTree"></div>
     </div>
+    <div id="alertsPan" class="hidden">
+      <div id="alertsTools"><button id="alNewBtn" class="btnpri">+ Новый алерт</button></div>
+      <div id="alertsList"></div>
+    </div>
   </aside>
-  <section id="charts"></section>
+  <div id="workCol">
+    <section id="charts"></section>
+    <section id="bottomDock" class="hidden">
+      <div id="dockResizer" title="Потяните для изменения высоты"></div>
+      <div id="dockHead">
+        <div class="dock-tabs">
+          <button data-dt="editor" class="on">Pine / MQL Редактор</button>
+          <button data-dt="console">Консоль (<span id="conCnt">0</span>)</button>
+          <button data-dt="tester">Тестер</button>
+        </div>
+        <span id="mqlMsg"></span>
+        <div class="dock-acts">
+          <button id="dockMax" title="Развернуть / восстановить">⤢</button>
+          <button id="dockClose" title="Закрыть панель">✕</button>
+        </div>
+      </div>
+      <div id="dockBody">
+        <div id="dockPanEditor" class="dock-pan">
+          <div class="dlgrow" style="margin-bottom:4px">
+            <input type="file" id="mqlFile" accept=".mq4,.mq5,.ex4,.ex5,.pine">
+            <button id="mqlNew">Новый MQL5</button>
+            <button id="mqlNewPine">Новый Pine</button>
+          </div>
+          <div class="mqlcols">
+            <div id="mqlList"></div>
+            <div id="mqlEd" class="hidden">
+              <div class="dlgrow">
+                <input id="mqlName" placeholder="Имя">
+                <select id="mqlVer"></select>
+                <button id="mqlSave" title="Ctrl+S">Сохранить</button>
+                <button id="mqlDesc">Проверить</button>
+                <button id="mqlRun" class="on">На график</button>
+                <button id="mqlDiffBtn">Diff</button>
+                <button id="mqlLogsBtn">Логи</button>
+                <button id="mqlDel">Удалить</button>
+              </div>
+              <div id="mqlInputs"></div>
+              <div id="mqlCodeHost"></div>
+              <pre id="mqlDiff" class="hidden"></pre>
+              <pre id="mqlLogs" class="hidden"></pre>
+            </div>
+          </div>
+        </div>
+        <div id="dockPanConsole" class="dock-pan hidden">
+          <div class="dlgrow"><button id="conClear">Очистить консоль</button></div>
+          <div id="conList"></div>
+        </div>
+        <div id="dockPanTester" class="dock-pan hidden">
+          <div style="padding:14px;display:flex;align-items:center;gap:12px">
+            <span>Запуск и аналитика стратегий Pine Script</span>
+            <button id="dockOpenTester" class="btnpri">Открыть Тестер стратегий</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
 </main>
 
 <footer id="info">
@@ -172,18 +233,6 @@
   </div>
 </div></div>
 
-<div id="mqlDlg" class="dlg hidden"><div class="dlgbox mqlbox">
-  <div class="dlghead"><b>MQL: библиотека</b><span id="mqlMsg"></span><button id="mqlClose">✕</button></div>
-  <div class="dlgrow"><input type="file" id="mqlFile" accept=".mq4,.mq5,.ex4,.ex5,.pine"><button id="mqlNew">Новый MQL5</button><button id="mqlNewPine">Новый Pine</button></div>
-  <div class="mqlcols"><div id="mqlList"></div>
-    <div id="mqlEd" class="hidden">
-      <div class="dlgrow"><input id="mqlName" placeholder="Имя"><select id="mqlVer"></select><button id="mqlSave">Сохранить версию</button><button id="mqlDesc">Разобрать</button><button id="mqlRun" class="on">Добавить на график</button><button id="mqlLogsBtn">Логи</button><button id="mqlDel">Удалить</button></div>
-      <div id="mqlInputs"></div>
-      <textarea id="mqlSrc" spellcheck="false"></textarea>
-      <pre id="mqlLogs" class="hidden"></pre>
-    </div></div>
-</div></div>
-
 <div id="authDlg" class="dlg hidden"><div class="dlgbox authbox">
   <div class="dlghead"><b id="authTitle">Вход</b></div>
   <input id="authEmail" type="email" placeholder="Email" autocomplete="username">
@@ -220,12 +269,59 @@
   <div id="setMsg"></div>
 </div></div>
 
+<div id="alertDlg" class="dlg hidden"><div class="dlgbox setbox alertbox">
+  <div class="sethead"><div class="settitle">🔔 Создать алерт</div><button id="alClose" class="setx">✕</button></div>
+  <div class="setpan" style="padding-bottom:14px">
+    <div class="al-grid2">
+      <label class="setlab">Рынок <select id="alCat"><option value="linear">USDT/USDC Perp</option><option value="spot">Spot</option><option value="inverse">Inverse</option></select></label>
+      <label class="setlab">Символ <input id="alSym" placeholder="BTCUSDT"></label>
+    </div>
+    <div class="al-grid2">
+      <label class="setlab">Условие <select id="alCond">
+        <option value="price_above">Цена выше</option>
+        <option value="price_below">Цена ниже</option>
+        <option value="price_cross">Пересечение цены</option>
+        <option value="channel_enter">Вход в канал</option>
+        <option value="channel_exit">Выход из канала</option>
+        <option value="pct_change">Изменение на %</option>
+        <option value="pine_script">Pine-скрипт (alert())</option>
+      </select></label>
+      <label class="setlab">Частота <select id="alMode">
+        <option value="once">Один раз</option>
+        <option value="once_per_bar">Раз в бар</option>
+        <option value="every_time">Каждый раз (кд 60с)</option>
+      </select></label>
+    </div>
+    <div id="alPriceRow" class="al-grid2">
+      <label class="setlab"><span id="alP1Lab">Цена</span> <input id="alP1" type="number" step="any"></label>
+      <label class="setlab hidden" id="alP2Wrap"><span id="alP2Lab">Граница 2</span> <input id="alP2" type="number" step="any"></label>
+    </div>
+    <div id="alPineRow" class="al-grid2 hidden">
+      <label class="setlab">Pine-скрипт <select id="alScript"></select></label>
+      <label class="setlab">Таймфрейм <select id="alTf"></select></label>
+    </div>
+    <div class="al-grid2">
+      <label class="setlab">Название <input id="alName" placeholder="Например: Пробой сопротивления"></label>
+      <label class="setlab">Истекает через (ч) <input id="alExp" type="number" min="0" placeholder="бессрочно"></label>
+    </div>
+    <label class="setlab">Сообщение <input id="alMsgTxt" placeholder="{{ticker}}: цена {{price}}"></label>
+    <label class="setlab">Webhook URL <span class="sethint">необязательно</span> <input id="alWebhook" placeholder="https://example.com/hook"></label>
+    <div class="dlgrow" style="margin:2px 0">
+      <label class="chk"><input type="checkbox" id="alTg" checked> Telegram</label>
+      <label class="chk"><input type="checkbox" id="alSound" checked> Звук</label>
+    </div>
+    <div id="alErr" class="dn" style="min-height:16px"></div>
+    <div class="setbtns"><button id="alSave" class="btnpri">Создать алерт</button><button id="alCancel" class="btnsec">Отмена</button></div>
+  </div>
+</div></div>
+
 <div id="toastBox"></div>
 
 <script src="/assets/vendor/lightweight-charts.js"></script>
 <script src="/assets/indicators.js"></script>
 <script src="/assets/drawings.js"></script>
 <script src="/assets/pineview.js"></script>
+<script src="/assets/code_editor.js"></script>
 <script src="/assets/tv_ux.js"></script>
 <script src="/assets/terminal.js"></script>
 </body>

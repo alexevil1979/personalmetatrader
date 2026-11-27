@@ -243,35 +243,146 @@
     };
   }
 
-  // ---------- alert levels ----------
+  // ---------- alert levels + full TV alerts ----------
   const LVL_UP = -101, LVL_DN = -102;
+  let allAlerts = [], alertLogs = [], lastAlertLogId = 0;
+  function playAlertChime() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      const ctx = new AC(), now = ctx.currentTime;
+      [[880, 0, 0.12], [1174.66, 0.12, 0.2]].forEach(([freq, t0, dur]) => {
+        const osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.type = 'sine'; osc.frequency.value = freq;
+        g.gain.setValueAtTime(0.08, now + t0);
+        g.gain.exponentialRampToValueAtTime(0.001, now + t0 + dur);
+        osc.connect(g); g.connect(ctx.destination);
+        osc.start(now + t0); osc.stop(now + t0 + dur + 0.02);
+      });
+      setTimeout(() => ctx.close(), 600);
+    } catch { /* autoplay blocked */ }
+  }
+  function applyServiceObjects(p) {
+    const t = p.candles.length ? p.candles[p.candles.length - 1].time : Math.floor(Date.now() / 1000);
+    const sv = [], lv = p.levelsData;
+    if (lv && lv.upper !== null && lv.upper !== undefined) sv.push({ id: LVL_UP, type: 'levelup', pts: [{ t, p: lv.upper }], style: { text: '⇑' } });
+    if (lv && lv.lower !== null && lv.lower !== undefined) sv.push({ id: LVL_DN, type: 'leveldn', pts: [{ t, p: lv.lower }], style: { text: '⇓' } });
+    for (const a of allAlerts) {
+      if (a.status !== 'active' || a.category !== p.cfg.category || a.symbol !== p.cfg.symbol || a.target_price === null) continue;
+      if (!['price_above', 'price_below', 'price_cross', 'channel_enter', 'channel_exit'].includes(a.condition_type)) continue;
+      sv.push({ id: -1000 - a.id, type: 'alertline', pts: [{ t, p: a.target_price }], style: { text: a.name || '', color: '#ffb300' } });
+    }
+    p.dw.setService(sv);
+  }
   async function loadLevels(p) {
     const cat = p.cfg.category, sym = p.cfg.symbol;
     try {
       const j = await call('GET', 'levels', { category: cat, symbol: sym });
       if (!panes.includes(p) || p.cfg.category !== cat || p.cfg.symbol !== sym) return;
-      if (j && j.levels !== undefined) applyLevels(p, j.levels);
+      if (j && j.levels !== undefined) { p.levelsData = j.levels; applyServiceObjects(p); }
     } catch { /* offline */ }
   }
-  function applyLevels(p, lv) {
-    const t = p.candles.length ? p.candles[p.candles.length - 1].time : Math.floor(Date.now() / 1000);
-    const sv = [];
-    if (lv && lv.upper !== null && lv.upper !== undefined) sv.push({ id: LVL_UP, type: 'levelup', pts: [{ t, p: lv.upper }], style: { text: '⇑' } });
-    if (lv && lv.lower !== null && lv.lower !== undefined) sv.push({ id: LVL_DN, type: 'leveldn', pts: [{ t, p: lv.lower }], style: { text: '⇓' } });
-    p.dw.setService(sv);
-  }
+  function applyLevels(p, lv) { p.levelsData = lv; applyServiceObjects(p); }
   function saveLevels(p) {
     const up = p.dw.service.find((x) => x.id === LVL_UP), lo = p.dw.service.find((x) => x.id === LVL_DN);
     return call('PUT', 'levels', { category: p.cfg.category, symbol: p.cfg.symbol }, { upper: up ? up.pts[0].p : null, lower: lo ? lo.pts[0].p : null }).catch(() => {});
   }
-  async function setLevelAtPrice(p, price) {
-    const last = p.candles.length ? p.candles[p.candles.length - 1].close : price;
-    const up = p.dw.service.find((x) => x.id === LVL_UP), lo = p.dw.service.find((x) => x.id === LVL_DN);
-    const upper = price >= last ? price : (up ? up.pts[0].p : null);
-    const lower = price < last ? price : (lo ? lo.pts[0].p : null);
-    await call('PUT', 'levels', { category: p.cfg.category, symbol: p.cfg.symbol }, { upper, lower }).catch(() => {});
-    applyLevels(p, { upper, lower });
-    PMTUx.toast(`Алерт установлен на ${price.toFixed(p.precision())}`, 'ok');
+  const COND_TXT = { price_above: 'Выше', price_below: 'Ниже', price_cross: 'Пересечение', channel_enter: 'Вход в канал', channel_exit: 'Выход из канала', pct_change: 'Изм. %', pine_script: 'Pine-скрипт' };
+  async function refreshAlerts(initLogId) {
+    try {
+      const j = await call('GET', 'alerts');
+      allAlerts = j.alerts || [];
+      alertLogs = j.logs || [];
+      if (initLogId && alertLogs.length) lastAlertLogId = alertLogs[0].id;
+      panes.forEach((p) => applyServiceObjects(p));
+      renderAlertsPanel();
+    } catch { /* ignore */ }
+  }
+  async function pollAlertLogs() {
+    if (!authed) return;
+    try {
+      const j = await call('GET', 'alerts/recent', { since: lastAlertLogId });
+      const rows = j.logs || [];
+      if (rows.length) {
+        lastAlertLogId = Math.max(lastAlertLogId, ...rows.map((x) => x.id));
+        rows.slice().reverse().forEach((r) => PMTUx.toast('🔔 ' + r.message, 'ok'));
+        playAlertChime();
+        refreshAlerts(false);
+      }
+    } catch { /* ignore */ }
+  }
+  function renderAlertsPanel() {
+    const host = $('#alertsList'); if (!host) return;
+    let html = '';
+    for (const a of allAlerts) {
+      const val = a.condition_type === 'pine_script' ? `TF ${a.tf}` : (a.target_price !== null ? a.target_price + (a.target_price2 !== null ? ` / ${a.target_price2}` : '') : '');
+      html += `<div class="al-row" data-aid="${a.id}"><div class="al-row-top"><b>${esc(a.symbol)} · ${esc(a.name || COND_TXT[a.condition_type] || a.condition_type)}</b><span class="al-st ${a.status}">${a.status}</span></div>`
+        + `<div class="al-row-sub"><span>${COND_TXT[a.condition_type] || a.condition_type} ${val}</span><span class="ot-acts"><button data-al="tog" data-id="${a.id}" title="Пауза/старт">${a.status === 'active' ? '⏸' : '▶'}</button><button data-al="del" data-id="${a.id}" title="Удалить">✕</button></span></div></div>`;
+    }
+    if (alertLogs.length) {
+      html += '<div class="ot-sec">Журнал срабатываний</div>' + alertLogs.slice(0, 20).map((l) => `<div class="al-row"><div>${esc(l.message)}</div><div class="al-row-sub"><span>${esc(l.symbol)}</span><span>${esc(l.created_at)}</span></div></div>`).join('');
+    }
+    host.innerHTML = html || '<div style="padding:10px;color:var(--mut)">Алертов пока нет. Нажмите «+ Новый алерт» или Alt+A.</div>';
+  }
+  async function openAlertModal(preset = {}) {
+    const p = panes[active], c = p ? p.cfg : { category: state.category, symbol: 'BTCUSDT', tf: '60' };
+    $('#alCat').value = preset.category || c.category;
+    $('#alSym').value = preset.symbol || c.symbol;
+    const last = p && p.candles.length ? p.candles[p.candles.length - 1].close : '';
+    const price = preset.price !== undefined ? preset.price : last;
+    $('#alCond').value = preset.price !== undefined && last !== '' ? (preset.price >= last ? 'price_above' : 'price_below') : 'price_above';
+    $('#alP1').value = price; $('#alP2').value = '';
+    $('#alName').value = ''; $('#alMsgTxt').value = ''; $('#alWebhook').value = ''; $('#alExp').value = '';
+    $('#alErr').textContent = '';
+    $('#alTf').innerHTML = TFS.map(([v, l]) => `<option value="${v}"${v === (preset.tf || c.tf) ? ' selected' : ''}>${l}</option>`).join('');
+    try {
+      const sc = await call('GET', 'mql/scripts');
+      $('#alScript').innerHTML = sc.scripts.filter((x) => x.lang === 'pine').map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('') || '<option value="">нет Pine-скриптов</option>';
+    } catch { /* ignore */ }
+    syncAlertForm();
+    $('#alertDlg').classList.remove('hidden');
+  }
+  function syncAlertForm() {
+    const cond = $('#alCond').value;
+    const isPine = cond === 'pine_script', isChan = cond === 'channel_enter' || cond === 'channel_exit', isPct = cond === 'pct_change';
+    $('#alPriceRow').classList.toggle('hidden', isPine);
+    $('#alPineRow').classList.toggle('hidden', !isPine);
+    $('#alP2Wrap').classList.toggle('hidden', !isChan && !isPct);
+    $('#alP1Lab').textContent = isChan ? 'Граница 1' : isPct ? 'Базовая цена' : 'Цена';
+    $('#alP2Lab').textContent = isPct ? 'Отклонение, %' : 'Граница 2';
+  }
+  function wireAlerts() {
+    const dlg = $('#alertDlg');
+    const close = () => dlg.classList.add('hidden');
+    $('#btnAlert').onclick = () => openAlertModal();
+    $('#alNewBtn').onclick = () => openAlertModal();
+    $('#alClose').onclick = $('#alCancel').onclick = close;
+    dlg.onmousedown = (e) => { if (e.target === dlg) close(); };
+    $('#alCond').onchange = syncAlertForm;
+    $('#alSave').onclick = async () => {
+      $('#alErr').textContent = '';
+      try {
+        await call('POST', 'alerts', null, {
+          category: $('#alCat').value, symbol: $('#alSym').value.trim().toUpperCase(), tf: $('#alTf').value,
+          condition_type: $('#alCond').value, target_price: $('#alP1').value, target_price2: $('#alP2').value,
+          script_id: $('#alScript').value || null, trigger_mode: $('#alMode').value,
+          name: $('#alName').value.trim(), message: $('#alMsgTxt').value.trim(), webhook_url: $('#alWebhook').value.trim(),
+          expires_hours: $('#alExp').value ? +$('#alExp').value : null,
+          notify_tg: $('#alTg').checked, sound: $('#alSound').checked,
+        });
+        close();
+        await refreshAlerts(false);
+        PMTUx.toast('Алерт создан', 'ok');
+      } catch (e) { $('#alErr').textContent = e.message; }
+    };
+    $('#alertsList').onclick = async (e) => {
+      const btn = e.target.closest('[data-al]'); if (!btn) return;
+      const id = +btn.dataset.id, act = btn.dataset.al;
+      if (act === 'del') { await call('DELETE', 'alerts/' + id); refreshAlerts(false); }
+      else if (act === 'tog') {
+        const a = allAlerts.find((x) => x.id === id);
+        if (a) { await call('PUT', 'alerts/' + id, null, { status: a.status === 'active' ? 'paused' : 'active' }); refreshAlerts(false); }
+      }
+    };
   }
 
   // ---------- WebSocket hub ----------
@@ -336,7 +447,7 @@
     : { bg: '#ffffff', txt: '#1b1f2a', grid: '#eceff4', up: '#16a085', dn: '#d9363e' };
 
   const chartMenuHooks = {
-    addLevelAt: setLevelAtPrice,
+    addLevelAt: (p, price) => openAlertModal({ category: p.cfg.category, symbol: p.cfg.symbol, tf: p.cfg.tf, price }),
     goToDate: (p) => PMTUx.openGoToDate(p, state.tz),
     compare: (p) => openCompareFor(p),
   };
@@ -498,6 +609,20 @@
     series(c) {
       if (this.cfg.type === 'line' || this.cfg.type === 'area' || this.cfg.type === 'baseline') return c.map((k) => ({ time: k.time, value: k.close }));
       if (this.cfg.type === 'ha') return heikin(c);
+      if (['candles', 'hollow', 'bars'].includes(this.cfg.type)) {
+        const bcMap = new Map();
+        for (const it of this.ind) {
+          if (it.mql && it.res && it.res.barcolors) {
+            it.res.barcolors.forEach((col, idx) => { if (col && it.res.times[idx] !== undefined) bcMap.set(it.res.times[idx], col); });
+          }
+        }
+        if (bcMap.size) {
+          return c.map((k) => {
+            const col = bcMap.get(k.time);
+            return col ? { ...k, color: this.cfg.type === 'hollow' && k.close >= k.open ? 'transparent' : col, borderColor: col, wickColor: col } : k;
+          });
+        }
+      }
       return c;
     }
     tfSec() { const t = TFS.find((x) => x[0] === this.cfg.tf); return !t ? 60 : t[0] === 'D' ? 86400 : t[0] === 'W' ? 604800 : t[0] === 'M' ? 2592000 : +t[0] * 60; }
@@ -698,9 +823,14 @@
       try {
         const r = await call('POST', 'mql/run', null, { id: inst.scriptId, category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, inputs: inst.params, limit: 1500, version: inst.version });
         st.res = r.ok ? r : st.res; st.err = r.ok ? null : r.error + (r.line ? ` (строка ${r.line})` : ''); st.logs = r.logs || [];
-      } catch (e) { st.err = e.message; }
+        if (!r.ok) logConsole(inst.name, 'err', st.err, r.line);
+        else (r.logs || []).forEach((ln) => logConsole(inst.name, ln.includes('[ERROR]') ? 'err' : ln.includes('[WARN]') ? 'warn' : 'info', ln));
+      } catch (e) { st.err = e.message; logConsole(inst.name, 'err', e.message); }
       st.key = key; st.busy = false;
-      if (this.main) this.refreshIndicators(true);
+      if (this.main) {
+        this.refreshIndicators(true);
+        if (st.res && st.res.barcolors && st.res.barcolors.some(Boolean)) this.main.setData(this.series(this.candles));
+      }
     }
     mqlItem(inst, full, paneIdx, markers) {
       const st = this.mqlSt(inst), res = st.res, sep = res && res.info.window === 'separate';
@@ -1170,8 +1300,19 @@
     activate: (p) => { const i = panes.indexOf(p); if (i >= 0 && i !== active) setActive(i); },
     toolDone: () => setTool('cursor'),
     onSel: (dw) => { if (panes[active] && panes[active].dw === dw) { updateObjBar(); renderObjTree(); } },
-    onServiceChange: (dw) => { const p = panes.find((x) => x.dw === dw); if (p) saveLevels(p); },
-    onServiceRemove: (dw) => { const p = panes.find((x) => x.dw === dw); if (p) saveLevels(p); },
+    onServiceChange: (dw, o) => {
+      const p = panes.find((x) => x.dw === dw); if (!p) return;
+      if (o && o.id <= -1000) {
+        const aid = -1000 - o.id, price = +o.pts[0].p.toFixed(p.precision());
+        call('PUT', 'alerts/' + aid, null, { target_price: price }).then(() => { refreshAlerts(false); PMTUx.toast('Цена алерта обновлена: ' + price, 'ok'); }).catch(() => {});
+      } else saveLevels(p);
+    },
+    onServiceRemove: (dw, o) => {
+      const p = panes.find((x) => x.dw === dw); if (!p) return;
+      if (o && o.id <= -1000) {
+        call('DELETE', 'alerts/' + (-1000 - o.id)).then(() => { refreshAlerts(false); PMTUx.toast('Алерт удалён'); }).catch(() => {});
+      } else saveLevels(p);
+    },
   };
   function setTool(t) {
     if (t !== 'cursor' && rulerMode) setRuler(false);
@@ -1260,12 +1401,16 @@
     const setSideTab = (tab) => {
       $('#tabWatch').classList.toggle('on', tab === 'watch');
       $('#tabObj').classList.toggle('on', tab === 'obj');
+      $('#tabAlerts').classList.toggle('on', tab === 'alerts');
       $('#watchPan').classList.toggle('hidden', tab !== 'watch');
       $('#objTreePan').classList.toggle('hidden', tab !== 'obj');
+      $('#alertsPan').classList.toggle('hidden', tab !== 'alerts');
       if (tab === 'obj') renderObjTree();
+      if (tab === 'alerts') refreshAlerts(false);
     };
     $('#tabWatch').onclick = () => setSideTab('watch');
     $('#tabObj').onclick = () => setSideTab('obj');
+    $('#tabAlerts').onclick = () => setSideTab('alerts');
     $('#objTree').onclick = (e) => {
       const p = panes[active]; if (!p) return;
       const cmp = e.target.closest('[data-ot-cmp]');
@@ -1295,7 +1440,7 @@
     };
   }
 
-  // ---------- MQL library dialog ----------
+  // ---------- Bottom Dock + Syntax-Highlighted Pine/MQL IDE + Console ----------
   const MQL_TEMPLATE = `//+------------------------------------------------------------------+
 //| Моя скользящая средняя (MQL5)                                     |
 //+------------------------------------------------------------------+
@@ -1339,8 +1484,32 @@ if showLabels and ta.crossover(close, ma)
 if showLabels and ta.crossunder(close, ma)
     label.new(bar_index, high, "DOWN", style=label.style_label_down, color=color.red, textcolor=color.white, yloc=yloc.abovebar)
 `;
-  let mqlSel = null, mqlInfo = null;
+  let mqlSel = null, mqlInfo = null, codeEd = null, conLogs = [];
   const mqlMsg = (t, bad) => { const el = $('#mqlMsg'); el.textContent = t || ''; el.className = bad ? 'dn' : 'up'; };
+  const resizeCharts = () => panes.forEach((p) => p.chart.resize(p.cv.clientWidth, p.cv.clientHeight));
+  function renderMqlInput(q, cur, attr) {
+    if (q.options && q.options.length) {
+      return `<label>${esc(q.title || q.name)} <select ${attr} data-k="${q.kind}">${q.options.map((o) => `<option value="${esc(o)}"${String(o) === String(cur) ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
+    }
+    if (q.kind === 'bool') return `<label>${esc(q.title || q.name)} <input type="checkbox" ${attr} data-k="bool" ${cur ? 'checked' : ''}></label>`;
+    return `<label>${esc(q.title || q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" ${attr} data-k="${q.kind}" value="${esc(cur)}"></label>`;
+  }
+  function logConsole(src, lvl, msg, line) {
+    conLogs.unshift({ ts: new Date().toTimeString().slice(0, 8), src, lvl, msg: String(msg), line: line || null });
+    if (conLogs.length > 200) conLogs.pop();
+    const cnt = $('#conCnt'); if (cnt) cnt.textContent = String(conLogs.length);
+    const list = $('#conList');
+    if (list) list.innerHTML = conLogs.map((c) => `<div class="con-row ${c.lvl}"${c.line ? ` data-cline="${c.line}"` : ''}><span>[${c.ts}]</span><b>${esc(c.src)}</b><span>${esc(c.msg)}</span></div>`).join('');
+  }
+  function openDock(tab = 'editor') {
+    const dock = $('#bottomDock');
+    dock.classList.remove('hidden');
+    document.querySelectorAll('.dock-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.dt === tab));
+    $('#dockPanEditor').classList.toggle('hidden', tab !== 'editor');
+    $('#dockPanConsole').classList.toggle('hidden', tab !== 'console');
+    $('#dockPanTester').classList.toggle('hidden', tab !== 'tester');
+    resizeCharts();
+  }
   async function mqlRefresh(selectId) {
     const j = await call('GET', 'mql/scripts');
     $('#mqlList').innerHTML = j.scripts.map((x) => `<div class="mrow${x.id === selectId ? ' sel' : ''}" data-id="${x.id}"><span>${esc(x.name)}</span><span class="badge${x.supported ? '' : ' bad'}">${x.lang}${x.supported ? '' : ' ✗'}</span></div>`).join('') || '<div style="color:var(--mut);padding:6px">Библиотека пуста. Загрузите .mq4/.mq5 или создайте индикатор.</div>';
@@ -1349,25 +1518,51 @@ if showLabels and ta.crossunder(close, ma)
   async function mqlSelect(id) {
     mqlSel = await call('GET', 'mql/scripts/' + id); mqlInfo = null;
     document.querySelectorAll('#mqlList .mrow').forEach((r) => r.classList.toggle('sel', +r.dataset.id === id));
-    $('#mqlEd').classList.remove('hidden'); $('#mqlLogs').classList.add('hidden');
+    $('#mqlEd').classList.remove('hidden'); $('#mqlLogs').classList.add('hidden'); $('#mqlDiff').classList.add('hidden');
     $('#mqlName').value = mqlSel.name; $('#mqlVer').innerHTML = mqlSel.versions.map((v) => `<option value="${v.version}">v${v.version} · ${v.created_at}</option>`).join('');
-    $('#mqlSrc').value = mqlSel.supported ? mqlSel.source : '/* EX4/EX5 — скомпилированный бинарник. Хранится в библиотеке, но не исполняется:\n   исходный код недоступен, а запуск требует настоящего терминала MetaTrader (см. docs/MQL.md). */';
-    $('#mqlSrc').readOnly = !mqlSel.supported; $('#mqlSave').disabled = !mqlSel.supported; $('#mqlRun').disabled = !mqlSel.supported;
+    codeEd.value = mqlSel.supported ? mqlSel.source : '/* EX4/EX5 — скомпилированный бинарник. Хранится в библиотеке, но не исполняется:\n   исходный код недоступен, а запуск требует настоящего терминала MetaTrader (см. docs/MQL.md). */';
+    codeEd.setReadOnly(!mqlSel.supported); $('#mqlSave').disabled = !mqlSel.supported; $('#mqlRun').disabled = !mqlSel.supported;
     $('#mqlInputs').innerHTML = ''; if (mqlSel.supported) await mqlDescribe();
   }
   async function mqlDescribe() {
     $('#mqlInputs').innerHTML = '<span style="color:var(--mut)">Разбор…</span>';
     const d = await call('POST', `mql/scripts/${mqlSel.id}/describe`);
-    if (!d.ok) { mqlInfo = null; $('#mqlInputs').innerHTML = `<div class="dn">Ошибка: ${esc(d.error)}${d.line ? ` (строка ${d.line})` : ''}</div>`; return; }
+    if (!d.ok) {
+      mqlInfo = null; codeEd.setErrorLine(d.line || null);
+      $('#mqlInputs').innerHTML = `<div class="dn">Ошибка: ${esc(d.error)}${d.line ? ` (строка ${d.line})` : ''}</div>`;
+      logConsole(mqlSel.name, 'err', d.error + (d.line ? ` (строка ${d.line})` : ''), d.line);
+      return;
+    }
+    codeEd.setErrorLine(null);
     mqlInfo = d.info;
     $('#mqlInputs').innerHTML = `<div style="color:var(--mut)">${esc(d.info.lang.toUpperCase())} · окно: ${d.info.window === 'separate' ? 'отдельное' : 'основной график'}${d.info.description ? ' · ' + esc(d.info.description) : ''}${d.info.copyright ? ' · © ' + esc(d.info.copyright) : ''}</div>` +
-      (d.info.inputs.length ? d.info.inputs.map((q) => (q.kind === 'bool' ? `<label>${esc(q.title || q.name)} <input type="checkbox" data-in="${esc(q.name)}" data-k="bool" ${q.default ? 'checked' : ''}></label>` : `<label>${esc(q.title || q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" data-in="${esc(q.name)}" data-k="${q.kind}" value="${esc(q.default)}"></label>`)).join('') : '<span style="color:var(--mut)">Входных параметров нет.</span>');
+      (d.info.inputs.length ? d.info.inputs.map((q) => renderMqlInput(q, q.default, `data-in="${esc(q.name)}"`)).join('') : '<span style="color:var(--mut)">Входных параметров нет.</span>');
     (d.logs || []).length && ($('#mqlInputs').innerHTML += `<pre>${esc(d.logs.join('\n'))}</pre>`);
   }
   function wireMql() {
-    $('#btnMql').onclick = () => { $('#mqlDlg').classList.remove('hidden'); mqlRefresh(mqlSel && mqlSel.id).catch((e) => mqlMsg(e.message, true)); };
-    $('#mqlClose').onclick = () => $('#mqlDlg').classList.add('hidden');
-    $('#mqlDlg').onmousedown = (e) => { if (e.target.id === 'mqlDlg') $('#mqlDlg').classList.add('hidden'); };
+    codeEd = new PMTCodeEd.CodeEditor($('#mqlCodeHost'), { onSave: () => $('#mqlSave').click() });
+    const dock = $('#bottomDock');
+    $('#btnMql').onclick = () => {
+      if (!dock.classList.contains('hidden') && !$('#dockPanEditor').classList.contains('hidden')) { dock.classList.add('hidden'); resizeCharts(); return; }
+      openDock('editor');
+      mqlRefresh(mqlSel && mqlSel.id).catch((e) => mqlMsg(e.message, true));
+    };
+    $('#dockClose').onclick = () => { dock.classList.add('hidden'); resizeCharts(); };
+    $('#dockMax').onclick = () => { dock.classList.toggle('max'); resizeCharts(); };
+    document.querySelectorAll('.dock-tabs button').forEach((b) => { b.onclick = () => openDock(b.dataset.dt); });
+    $('#dockOpenTester').onclick = () => $('#btnTest').click();
+    $('#conClear').onclick = () => { conLogs = []; $('#conCnt').textContent = '0'; $('#conList').innerHTML = ''; };
+    $('#conList').onclick = (e) => {
+      const r = e.target.closest('[data-cline]'); if (!r) return;
+      openDock('editor'); codeEd.setErrorLine(+r.dataset.cline);
+    };
+    $('#dockResizer').onmousedown = (e) => {
+      e.preventDefault();
+      const startY = e.clientY, startH = dock.offsetHeight;
+      const move = (ev) => { dock.classList.remove('max'); dock.style.height = Math.max(150, Math.min(window.innerHeight * 0.78, startH + (startY - ev.clientY))) + 'px'; resizeCharts(); };
+      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+      window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+    };
     $('#mqlList').onclick = (e) => { const r = e.target.closest('.mrow'); if (r) mqlSelect(+r.dataset.id).catch((x) => mqlMsg(x.message, true)); };
     $('#mqlFile').onchange = async (e) => {
       const f = e.target.files[0]; e.target.value = ''; if (!f) return;
@@ -1383,11 +1578,36 @@ if showLabels and ta.crossunder(close, ma)
     $('#mqlNew').onclick = async () => { try { const j = await call('POST', 'mql/scripts', null, { name: 'Новый индикатор', lang: 'mq5', source: MQL_TEMPLATE }); await mqlRefresh(j.id); } catch (x) { mqlMsg(x.message, true); } };
     $('#mqlNewPine').onclick = async () => { try { const j = await call('POST', 'mql/scripts', null, { name: 'Новый Pine', lang: 'pine', source: PINE_TEMPLATE }); await mqlRefresh(j.id); } catch (x) { mqlMsg(x.message, true); } };
     $('#mqlSave').onclick = async () => {
-      try { await call('PUT', 'mql/scripts/' + mqlSel.id, null, { source: $('#mqlSrc').value, name: $('#mqlName').value }); mqlMsg('Сохранена новая версия'); await mqlRefresh(mqlSel.id); } catch (x) { mqlMsg(x.message, true); }
+      try {
+        await call('PUT', 'mql/scripts/' + mqlSel.id, null, { source: codeEd.value, name: $('#mqlName').value });
+        mqlMsg('Сохранена новая версия');
+        await mqlRefresh(mqlSel.id);
+        panes.forEach((p) => {
+          if (p.cfg.indicators.some((x) => x.type === 'mql' && x.scriptId === mqlSel.id)) {
+            p.cfg.indicators.filter((x) => x.type === 'mql' && x.scriptId === mqlSel.id).forEach((x) => { if (p.mql && p.mql[x.uid]) p.mql[x.uid].key = ''; });
+            p.refreshIndicators(true);
+          }
+        });
+      } catch (x) { mqlMsg(x.message, true); }
     };
-    $('#mqlVer').onchange = async (e) => { const v = await call('GET', `mql/scripts/${mqlSel.id}/version`, { v: e.target.value }); $('#mqlSrc').value = v.source; mqlMsg(`Показана v${v.version}; «Сохранить версию» сделает её текущей`); };
+    $('#mqlVer').onchange = async (e) => { const v = await call('GET', `mql/scripts/${mqlSel.id}/version`, { v: e.target.value }); codeEd.value = v.source; mqlMsg(`Показана v${v.version}; «Сохранить» сделает её текущей`); };
     $('#mqlDesc').onclick = () => mqlDescribe().catch((x) => mqlMsg(x.message, true));
     $('#mqlDel').onclick = async () => { if (!confirm('Удалить скрипт и все версии?')) return; await call('DELETE', 'mql/scripts/' + mqlSel.id); mqlSel = null; $('#mqlEd').classList.add('hidden'); mqlRefresh(); };
+    $('#mqlDiffBtn').onclick = async () => {
+      const el = $('#mqlDiff'); if (!el.classList.toggle('hidden')) return;
+      if (!mqlSel || mqlSel.versions.length < 2) { el.textContent = 'Нет предыдущей версии для сравнения'; return; }
+      const curV = +$('#mqlVer').value, prevV = mqlSel.versions.find((v) => v.version < curV);
+      if (!prevV) { el.textContent = 'Это первая версия'; return; }
+      const oldSrc = (await call('GET', `mql/scripts/${mqlSel.id}/version`, { v: prevV.version })).source.split('\n');
+      const newSrc = codeEd.value.split('\n');
+      const out = []; const max = Math.max(oldSrc.length, newSrc.length);
+      for (let i = 0; i < max; i++) {
+        if (oldSrc[i] === newSrc[i]) continue;
+        if (oldSrc[i] !== undefined) out.push(`<span class="diff-del">- L${i + 1}: ${esc(oldSrc[i])}</span>`);
+        if (newSrc[i] !== undefined) out.push(`<span class="diff-add">+ L${i + 1}: ${esc(newSrc[i])}</span>`);
+      }
+      el.innerHTML = out.join('\n') || 'Изменений относительно v' + prevV.version + ' нет';
+    };
     $('#mqlLogsBtn').onclick = async () => {
       const l = (await call('GET', `mql/scripts/${mqlSel.id}/logs`)).logs; const el = $('#mqlLogs'); el.classList.toggle('hidden');
       el.textContent = l.map((x) => `[${x.created_at}] v${x.version} ${x.level.toUpperCase()} ${x.duration_ms ?? ''}ms\n${x.message}`).join('\n\n') || 'Запусков ещё не было';
@@ -1416,7 +1636,7 @@ if showLabels and ta.crossunder(close, ma)
     const d = await call('POST', `mql/scripts/${$('#tScript').value}/describe`);
     if (!d.ok) { $('#tInputs').innerHTML = `<div class="dn">Ошибка: ${esc(d.error)}${d.line ? ` (строка ${d.line})` : ''}</div>`; return; }
     if (!d.info.isStrategy) { $('#tInputs').innerHTML = '<div class="dn">Это индикатор: в скрипте нет strategy(...). Тестер работает со стратегиями.</div>'; return; }
-    $('#tInputs').innerHTML = d.info.inputs.map((q) => (q.kind === 'bool' ? `<label>${esc(q.title || q.name)} <input type="checkbox" data-ti="${esc(q.name)}" data-k="bool" ${q.default ? 'checked' : ''}></label>` : `<label>${esc(q.title || q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" data-ti="${esc(q.name)}" data-k="${q.kind}" value="${esc(q.default)}"></label>`)).join('') || '';
+    $('#tInputs').innerHTML = d.info.inputs.map((q) => renderMqlInput(q, q.default, `data-ti="${esc(q.name)}"`)).join('') || '';
   }
   function tShowResult(r) {
     tLast = r; const m = r.metrics, cls = (v) => (v >= 0 ? 'up' : 'dn');
@@ -1540,7 +1760,7 @@ if showLabels and ta.crossunder(close, ma)
 
     $('#indList').innerHTML = p.cfg.indicators.map((inst) => {
       if (inst.type === 'mql') {
-        const ps = (inst.meta && inst.meta.inputs || []).map((q) => { const cur = inst.params[q.name] ?? q.default; return q.kind === 'bool' ? `<label>${esc(q.title || q.name)} <input type="checkbox" ${cur ? 'checked' : ''} data-u="${inst.uid}" data-mp="${q.name}" data-k="bool"></label>` : `<label>${esc(q.title || q.name)} <input type="${q.kind === 'string' ? 'text' : 'number'}" step="any" value="${String(cur).replace(/"/g, '&quot;')}" data-u="${inst.uid}" data-mp="${q.name}" data-k="${q.kind}"></label>`; }).join('');
+        const ps = (inst.meta && inst.meta.inputs || []).map((q) => renderMqlInput(q, inst.params[q.name] ?? q.default, `data-u="${inst.uid}" data-mp="${esc(q.name)}"`)).join('');
         return `<div class="card" data-card-uid="${inst.uid}"><div class="h"><input type="checkbox" data-u="${inst.uid}" data-vis ${inst.visible !== false ? 'checked' : ''}><span>MQL: ${esc(inst.name)}</span><span class="grow"></span><button data-u="${inst.uid}" data-del>Удалить</button></div><div>${ps}</div></div>`;
       }
       const d = PMTInd.REG[inst.type];
@@ -1658,7 +1878,7 @@ if showLabels and ta.crossunder(close, ma)
       screenshot: () => panes[active] && PMTUx.takeScreenshot(panes[active]),
       setTool,
       toggleRuler: () => setRuler(!rulerMode),
-      quickAlert: () => $('#btnLevels').click(),
+      quickAlert: () => openAlertModal(),
       undo: () => { if (panes[active] && !panes[active].dw.undo()) PMTUx.toast('Нечего отменять'); },
       redo: () => { if (panes[active] && !panes[active].dw.redo()) PMTUx.toast('Нечего повторять'); },
       clone: () => { panes[active] && panes[active].dw.cloneSelected(); },
@@ -1668,7 +1888,7 @@ if showLabels and ta.crossunder(close, ma)
         setTool('cursor');
       },
     });
-    wireIndicators(); wireTools(); wireMql(); wireTester(); wireSettings();
+    wireIndicators(); wireTools(); wireMql(); wireTester(); wireSettings(); wireAlerts();
 
     $('#tfButtons').innerHTML = TFS.map(([v, l]) => `<button data-tf="${v}">${l}</button>`).join('');
     $('#tfButtons').onclick = (e) => { const b = e.target.closest('button'); if (b) applyToPanes({ tf: b.dataset.tf }); };
@@ -1756,7 +1976,9 @@ if showLabels and ta.crossunder(close, ma)
     const first = state.panes[0] || { category: state.category, symbol: 'BTCUSDT', tf: '60', type: 'candles' };
     $('#category').value = first.category;
     loadSymbols(first.category).catch(() => {}).finally(() => {
-      ensureLayout(); pollTickers(); setInterval(pollTickers, 3000);
+      ensureLayout(); refreshAlerts(true); pollTickers();
+      setInterval(pollTickers, 3000);
+      setInterval(pollAlertLogs, 6000);
       setInterval(() => panes.forEach((p) => p.tickCountdown()), 1000);
       window.addEventListener('beforeunload', save);
     });

@@ -141,4 +141,29 @@ assert.ok(r.fills[0].colors[50] && r.fills[0].colors[50].startsWith('rgba('));
 assert.strictEqual(r.fills[1].a.kind, 'hline'); assert.strictEqual(r.fills[1].a.price, 105);
 console.log('OK fill()');
 
+// ---- barcolor, alert(), alertcondition(), log.*, runtime.error(), input options ----
+const { describe } = require('../pine/engine');
+const optSrc = `//@version=5
+indicator("opts", overlay=true)
+mode = input.string("Fast", "Mode", options=["Fast", "Slow"])
+barcolor(close > open ? color.green : color.red)
+if bar_index == 10
+    log.info("bar", bar_index)
+    log.warning("warn", mode)
+    alert("Triggered " + mode)
+alertcondition(bar_index == 12, title="Cond12", message="Hit 12")
+plot(close, "c")
+`;
+const dOpt = describe(optSrc);
+assert.deepStrictEqual(dOpt.info.inputs[0].options, ['Fast', 'Slow'], 'input options metadata');
+r = run({ source: optSrc, candles: C, inputs: { mode: 'Slow' }, symbol: 'X', periodMin: 60, point: 0.01, extra: {} });
+assert.strictEqual(r.barcolors.length, C.length);
+assert.strictEqual(r.barcolors[5], C[5].close > C[5].open ? '#4CAF50' : '#F23645');
+assert.strictEqual(r.alerts.length, 2);
+assert.strictEqual(r.alerts[0].message, 'Triggered Slow');
+assert.strictEqual(r.alerts[1].title, 'Cond12');
+assert.ok(r.logs.some((x) => x.includes('[INFO] bar 10')) && r.logs.some((x) => x.includes('[WARN] warn Slow')));
+assert.throws(() => go('if bar_index == 5\n    runtime.error("boom")\nplot(close)'), /boom/);
+console.log('OK barcolor / alert / log / runtime.error / input options');
+
 console.log('ALL PINE EXTENSION TESTS PASSED');

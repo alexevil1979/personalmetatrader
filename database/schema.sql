@@ -288,3 +288,49 @@ ALTER TABLE user_notify ADD COLUMN tg_proxy VARCHAR(255) NULL;
 -- migration: widen Telegram credential columns for encrypted payloads
 ALTER TABLE user_notify MODIFY telegram_token VARCHAR(512) NULL;
 ALTER TABLE user_notify MODIFY tg_proxy VARCHAR(512) NULL;
+
+-- Full TradingView-style alerts & trigger history
+CREATE TABLE IF NOT EXISTS alerts (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  category VARCHAR(16) NOT NULL,
+  symbol VARCHAR(32) NOT NULL,
+  tf VARCHAR(4) NOT NULL DEFAULT '60',
+  name VARCHAR(120) NOT NULL DEFAULT '',
+  condition_type ENUM('price_above','price_below','price_cross','channel_enter','channel_exit','pct_change','pine_script') NOT NULL,
+  target_price DOUBLE NULL,
+  target_price2 DOUBLE NULL,
+  script_id INT UNSIGNED NULL,
+  params_json JSON NULL,
+  trigger_mode ENUM('once','once_per_bar','every_time') NOT NULL DEFAULT 'once',
+  message VARCHAR(500) NULL,
+  webhook_url VARCHAR(512) NULL,
+  notify_tg TINYINT(1) NOT NULL DEFAULT 1,
+  notify_ui TINYINT(1) NOT NULL DEFAULT 1,
+  sound TINYINT(1) NOT NULL DEFAULT 1,
+  status ENUM('active','paused','triggered','expired') NOT NULL DEFAULT 'active',
+  last_price DOUBLE NULL,
+  last_bar_time BIGINT UNSIGNED NULL,
+  last_triggered_at DATETIME NULL,
+  expires_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY ix_alerts_user (user_id, status),
+  KEY ix_alerts_sym (category, symbol, status),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS alert_logs (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  alert_id INT UNSIGNED NULL,
+  user_id INT UNSIGNED NOT NULL,
+  category VARCHAR(16) NOT NULL,
+  symbol VARCHAR(32) NOT NULL,
+  trigger_price DOUBLE NULL,
+  message VARCHAR(500) NOT NULL,
+  channels_json JSON NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_alogs_user (user_id, id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE SET NULL
+) ENGINE=InnoDB;

@@ -5,6 +5,7 @@ namespace PMT\Http;
 
 use InvalidArgumentException;
 use PMT\Bybit\Market;
+use PMT\Core\Alerts;
 use PMT\Core\Auth;
 use PMT\Core\Cache;
 use PMT\Core\Crypto;
@@ -261,6 +262,10 @@ final class Api
         }
         if ($path === '/api/layouts' || preg_match('#^/api/layouts/(\d+)$#', $path, $lm)) {
             self::layouts($path, $method, $uid, isset($lm[1]) ? (int) $lm[1] : null);
+            return;
+        }
+        if ($path === '/api/alerts' || $path === '/api/alerts/recent' || preg_match('#^/api/alerts/(\d+)$#', $path, $am)) {
+            self::alerts($path, $method, $uid, isset($am[1]) ? (int) $am[1] : null);
             return;
         }
         switch ($path) {
@@ -554,6 +559,39 @@ final class Api
             }
             $pdo->commit();
             self::out(['ok' => true, 'id' => $outId, 'name' => $name]);
+            return;
+        }
+        self::out(['error' => 'method'], 405);
+    }
+
+    private static function alerts(string $path, string $method, int $uid, ?int $id): void
+    {
+        if ($path === '/api/alerts/recent') {
+            self::out(['logs' => Alerts::logs($uid, (int) ($_GET['since'] ?? 0), 20)]);
+            return;
+        }
+        if ($id !== null) {
+            if ($method === 'PUT') {
+                self::out(Alerts::update($uid, $id, self::body(16384)));
+                return;
+            }
+            if ($method === 'DELETE') {
+                Alerts::delete($uid, $id);
+                self::out(['ok' => true]);
+                return;
+            }
+            self::out(['error' => 'method'], 405);
+            return;
+        }
+        if ($method === 'GET') {
+            self::out([
+                'alerts' => Alerts::list($uid, $_GET['category'] ?? null, $_GET['symbol'] ?? null),
+                'logs' => Alerts::logs($uid, 0, 50),
+            ]);
+            return;
+        }
+        if ($method === 'POST') {
+            self::out(Alerts::create($uid, self::body(16384)));
             return;
         }
         self::out(['error' => 'method'], 405);

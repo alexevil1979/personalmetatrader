@@ -10,6 +10,7 @@ $root = dirname(__DIR__, 2);
 require $root . '/src/bootstrap.php';
 
 use PMT\Bybit\Market;
+use PMT\Core\Alerts;
 use PMT\Core\Crypto;
 use PMT\Core\Env;
 use PMT\Core\Tg;
@@ -91,5 +92,17 @@ assertThrows(static fn() => Market::checkCategory('futures'), 'market bad cat');
 assertThrows(static fn() => Market::checkSymbol('btc-usdt'), 'market bad sym');
 assertThrows(static fn() => Market::checkTf('999'), 'market bad tf');
 echo "OK Market validation\n";
+
+// 5. Alerts SSRF webhook validation & message formatting
+assertSameVal(null, Alerts::validateWebhook(''), 'alerts empty webhook');
+assertSameVal('https://8.8.8.8/hook', Alerts::validateWebhook('https://8.8.8.8/hook'), 'alerts public IP webhook');
+assertThrows(static fn() => Alerts::validateWebhook('http://127.0.0.1/hook'), 'alerts block loopback');
+assertThrows(static fn() => Alerts::validateWebhook('http://192.168.1.152/hook'), 'alerts block LAN');
+assertThrows(static fn() => Alerts::validateWebhook('http://10.0.0.1/hook'), 'alerts block 10.x');
+assertThrows(static fn() => Alerts::validateWebhook('http://169.254.169.254/latest'), 'alerts block metadata IP');
+assertThrows(static fn() => Alerts::validateWebhook('http://localhost/hook'), 'alerts block localhost');
+assertThrows(static fn() => Alerts::validateWebhook('ftp://8.8.8.8/hook'), 'alerts block ftp');
+assertSameVal('BTCUSDT: 95000 (Breakout)', Alerts::formatMessage('{{ticker}}: {{price}} ({{name}})', ['symbol' => 'BTCUSDT', 'price' => '95000', 'name' => 'Breakout']), 'alerts formatMessage');
+echo "OK Alerts validation\n";
 
 echo "ALL PHP SMOKE TESTS PASSED\n";

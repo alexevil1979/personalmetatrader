@@ -139,5 +139,25 @@ reg('input.source', ['defval', 'title'], {}, () => (s, a) => a[0]);
 reg('input', ['defval', 'title', 'tooltip', 'inline', 'group', '__name'], {}, (P) => (s, a, n) => { const nm = n.__name; const v = a[0]; if (nm && P.env.inputs && nm in P.env.inputs && (typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string')) { const o = P.env.inputs[nm]; return typeof v === 'boolean' ? (o === true || o === 'true') : typeof v === 'number' ? Number(o) : String(o); } return v; });
 
 reg('request.security', ['symbol', 'timeframe', 'expression', 'gaps', 'lookahead'], {}, () => () => undefined); // compiled specially (P.security)
+// ---------- logging, errors & alerts ----------
+const pushLog = (P, lvl, args) => {
+  if (P.logs.length >= 200) return;
+  const msg = args.map((x) => { const v = val(x); return typeof v === 'number' ? fmtNum(v) : String(v); }).join(' ');
+  P.logs.push(`[bar ${P.C.i}] [${lvl}] ${msg}`);
+};
+reg('log.info', [], {}, (P) => (s, a) => pushLog(P, 'INFO', a));
+reg('log.warning', [], {}, (P) => (s, a) => pushLog(P, 'WARN', a));
+reg('log.error', [], {}, (P) => (s, a) => pushLog(P, 'ERROR', a));
+reg('runtime.error', ['message'], {}, () => (s, a) => { throw new Error(String(val(a[0]) || 'runtime.error')); });
+reg('alert', ['message', 'freq'], {}, (P) => (s, a, n) => {
+  if (P.out.alerts.length >= 200) return;
+  P.out.alerts.push({ bar: P.C.i, message: String(val(n.message !== undefined ? n.message : a[0]) ?? ''), freq: n.freq || a[1] || 'once' });
+});
+reg('alertcondition', ['condition', 'title', 'message'], {}, (P) => (s, a, n) => {
+  if (P.out.alerts.length >= 200) return;
+  const cond = val(n.condition !== undefined ? n.condition : a[0]);
+  if (!cond || (typeof cond === 'number' && Number.isNaN(cond))) return;
+  P.out.alerts.push({ bar: P.C.i, title: String(n.title ?? a[1] ?? 'Alert'), message: String(n.message ?? a[2] ?? '') });
+});
 // ---------- misc no-ops ----------
-for (const f of ['alertcondition', 'alert', 'fill', 'indicator', 'strategy', 'library', 'runtime.error', 'log.info', 'log.warning', 'log.error']) reg(f, [], {}, () => () => undefined);
+for (const f of ['indicator', 'strategy', 'library']) reg(f, [], {}, () => () => undefined);

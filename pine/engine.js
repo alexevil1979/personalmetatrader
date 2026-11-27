@@ -45,7 +45,7 @@ function run(req) {
   return {
     ok: true, strategy, bars: n, times: env.candles.map((c) => c.time),
     info: { lang: 'pine', isStrategy: !!P.broker, title: P.ind.title, overlay: P.ind.overlay, window: P.ind.overlay ? 'chart' : 'separate', inputs: meta.inputs, securityTfs: meta.securityTfs, version: meta.version },
-    plots, shapes: o.shapes, bg: Array.from({ length: n }, (_, i) => o.bg[i] || null), hlines: o.hlines.map(({ site, ...r }) => r), fills,
+    plots, shapes: o.shapes, bg: Array.from({ length: n }, (_, i) => o.bg[i] || null), barcolors: Array.from({ length: n }, (_, i) => o.barcolors[i] || null), hlines: o.hlines.map(({ site, ...r }) => r), fills, alerts: o.alerts,
     labels: o.labels.filter((l) => !l.deleted).map(({ deleted, ...r }) => r), lines: o.lines.filter((l) => !l.deleted && [l.x1, l.y1, l.x2, l.y2].every(Number.isFinite)).map(({ deleted, ...r }) => r), boxes: o.boxes.filter((b) => !b.deleted).map(({ deleted, ...r }) => r),
     tables: o.tables.filter((t) => !t.deleted).map((t) => ({ position: t.position, columns: t.columns, rows: t.rows, bgcolor: t.bgcolor, border: t.border, borderWidth: t.borderWidth, cells: Object.values(t.cells) })), logs: P.logs,
   };
