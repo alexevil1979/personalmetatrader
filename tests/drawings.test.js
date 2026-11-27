@@ -16,6 +16,11 @@ for (const type of Object.keys(NEED)) {
 const f = geom({ id: 1, type: 'fibret', pts: [{ t: 1100, p: 100 }, { t: 1500, p: 300 }], style: {} }, E);
 const l0 = f.L.find((l) => l.r === 0), l1 = f.L.find((l) => l.r === 1);
 assert.strictEqual(l0.a.y, 200); assert.strictEqual(l1.a.y, 400);
+// pencil: freehand polyline — one segment between each pair of consecutive points
+const pencil = geom({ id: 1, type: 'pencil', pts: [{ t: 1100, p: 100 }, { t: 1300, p: 150 }, { t: 1500, p: 120 }], style: {} }, E);
+assert.strictEqual(pencil.L.length, 2);
+assert.deepStrictEqual([pencil.L[0].a.x, pencil.L[0].a.y], [10, 400]);
+assert.deepStrictEqual([pencil.L[1].b.x, pencil.L[1].b.y], [50, 380]);
 // objects keep their price after a "zoom" (different env) because they are stored in time/price
 const E2 = { ...E, Y: (p) => 500 - p * 2 };
 assert.strictEqual(geom({ id: 1, type: 'hline', pts: [{ t: 1000, p: 100 }], style: {} }, E2).L[0].a.y, 300);

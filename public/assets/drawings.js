@@ -5,9 +5,9 @@
  * geom() is pure (given a coordinate env) so it is used for drawing and for hit-testing.
  */
 (() => {
-  const NEED = { hline: 1, vline: 1, trend: 2, ray: 2, channel: 3, rect: 2, fibret: 2, fibext: 3, fibfan: 2, fibtime: 2, pitchfork: 3, text: 1, arrow: 2, pricelabel: 1 };
-  const NAMES = { hline: 'Горизонтальная линия', vline: 'Вертикальная линия', trend: 'Трендовая линия', ray: 'Луч', channel: 'Канал', rect: 'Прямоугольник', fibret: 'Fibonacci Retracement', fibext: 'Fibonacci Extension', fibfan: 'Fibonacci Fan', fibtime: 'Fibonacci Time Zones', pitchfork: 'Вилы Эндрюса', text: 'Текст', arrow: 'Стрелка', pricelabel: 'Ценовая метка' };
-  const DEF_COLOR = { fibret: '#ff9800', fibext: '#ff9800', fibfan: '#ff9800', fibtime: '#ff9800', pitchfork: '#e91e63', channel: '#2962ff', rect: '#2962ff', arrow: '#ffeb3b', text: '#d1d4dc', pricelabel: '#26a69a' };
+  const NEED = { hline: 1, vline: 1, trend: 2, ray: 2, channel: 3, rect: 2, fibret: 2, fibext: 3, fibfan: 2, fibtime: 2, pitchfork: 3, text: 1, arrow: 2, pricelabel: 1, pencil: 2 };
+  const NAMES = { hline: 'Горизонтальная линия', vline: 'Вертикальная линия', trend: 'Трендовая линия', ray: 'Луч', channel: 'Канал', rect: 'Прямоугольник', fibret: 'Fibonacci Retracement', fibext: 'Fibonacci Extension', fibfan: 'Fibonacci Fan', fibtime: 'Fibonacci Time Zones', pitchfork: 'Вилы Эндрюса', text: 'Текст', arrow: 'Стрелка', pricelabel: 'Ценовая метка', pencil: 'Карандаш — свободная линия' };
+  const DEF_COLOR = { fibret: '#ff9800', fibext: '#ff9800', fibfan: '#ff9800', fibtime: '#ff9800', pitchfork: '#e91e63', channel: '#2962ff', rect: '#2962ff', arrow: '#ffeb3b', text: '#d1d4dc', pricelabel: '#26a69a', pencil: '#26a69a' };
   const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
   const colorOf = (o) => o.style.color || DEF_COLOR[o.type] || '#2962ff';
 
@@ -69,6 +69,7 @@
       }
       case 'text': { const s = o.style.text || 'Text', w = s.length * 7 + 8; T.push({ x: a.x + 4, y: a.y + 4, s, align: 'left', big: true }); const q = [{ x: a.x, y: a.y - 12 }, { x: a.x + w, y: a.y - 12 }, { x: a.x + w, y: a.y + 8 }, { x: a.x, y: a.y + 8 }]; q.forEach((p, i) => L.push({ ...seg(p, q[(i + 1) % 4]), hit: true })); break; }
       case 'pricelabel': L.push(seg(a, { x: a.x + 40, y: a.y })); T.push({ x: a.x + 44, y: a.y + 4, s: o.pts[0].p.toFixed(E.prec), align: 'left', tag: true }); break;
+      case 'pencil': for (let i = 1; i < P.length; i++) L.push(seg(P[i - 1], P[i])); break;
       default: return null;
     }
     return { L, F, T, P };
@@ -189,6 +190,12 @@
       if (e.button !== 0 || !this.inside(e)) return;
       this.hooks.activate(this.pane);
       const tool = this.hooks.tool();
+      if (tool === 'pencil') { // freehand: collect while the button is held, finish on up()
+        const p = this.pt(e, false); if (!p) return;
+        e.stopPropagation(); e.preventDefault();
+        this.creating = { type: 'pencil', pts: [{ t: p.t, p: p.p }] };
+        this.request(); return;
+      }
       if (tool !== 'cursor') {
         const p = this.pt(e, true); if (!p) return;
         e.stopPropagation(); e.preventDefault();
@@ -208,13 +215,20 @@
       const cr = this.creating; this.creating = null;
       const o = { id: Date.now() + Math.floor(Math.random() * 1000), type: cr.type, pts: cr.pts, style: { color: null, width: 1 } };
       if (cr.type === 'text') { const s = prompt('Текст'); if (!s) { this.hooks.toolDone(); return; } o.style.text = s; }
-      this.objs.push(o); this.sel = o.id; persist(this.key); this.hooks.toolDone(); this.hooks.onSel(this); this.request();
+      this.objs.push(o); this.sel = o.id; persist(this.key); if (cr.type !== 'pencil') this.hooks.toolDone(); this.hooks.onSel(this); this.request();
     }
     move(e) {
       if (this.creating) { this.hover = this.pt(e, true); this.request(); }
       this.pane.cv.style.cursor = this.hooks.tool() !== 'cursor' ? 'crosshair' : '';
     }
     winMove(e) {
+      if (this.creating && this.creating.type === 'pencil') {
+        if (!this.inside(e)) return;
+        const p = this.pt(e, false); if (!p) return;
+        const pts = this.creating.pts, E = this.env(), last = pts[pts.length - 1], lx = E.X(last.t), ly = E.Y(last.p);
+        if (lx === null || ly === null || Math.hypot(E.X(p.t) - lx, E.Y(p.p) - ly) < 3) return; // skip micro-moves
+        pts.push({ t: p.t, p: p.p }); this.request(); return;
+      }
       if (!this.drag) return;
       const p = this.pt(e, false); if (!p || !this.drag.p0) return; this.drag.moved = true;
       const d = this.drag, o = d.o;
@@ -222,7 +236,10 @@
       const dl = p.l - d.p0.l, dp = p.p - d.p0.p;
       o.pts = d.orig.map((q) => ({ t: this.lToT(this.tToL(q.t) + dl), p: q.p + dp })); this.request();
     }
-    up() { if (this.drag) { if (this.drag.moved) persist(this.key); this.drag = null; } }
+    up() {
+      if (this.creating && this.creating.type === 'pencil') { if (this.creating.pts.length >= 2) this.finish(); else { this.creating = null; this.request(); } return; }
+      if (this.drag) { if (this.drag.moved) persist(this.key); this.drag = null; }
+    }
     dbl(e) {
       if (!this.inside(e)) return; const h = this.hit(e);
       if (h && h.o.type === 'text') { e.stopPropagation(); const s = prompt('Текст', h.o.style.text); if (s) { h.o.style.text = s; persist(this.key); } }

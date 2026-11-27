@@ -521,7 +521,7 @@
     if (o) { $('#objName').textContent = PMTDraw.NAMES[o.type]; $('#objColor').value = PMTDraw.colorOf(o); $('#objWidth').value = o.style.width || 1; }
   }
   function wireTools() {
-    const G = { hline: '─', vline: '│', trend: '╱', ray: '↗', channel: '▱', rect: '▭', fibret: 'Fib', fibext: 'FbE', fibfan: 'Fan', fibtime: 'FbT', pitchfork: 'Ψ', text: 'T', arrow: '➚', pricelabel: '$' };
+    const G = { hline: '─', vline: '│', trend: '╱', ray: '↗', channel: '▱', rect: '▭', fibret: 'Fib', fibext: 'FbE', fibfan: 'Fan', fibtime: 'FbT', pitchfork: 'Ψ', text: 'T', arrow: '➚', pricelabel: '$', pencil: '✎' };
     $('#tools').innerHTML = [['cursor', '⌖', 'Курсор / выбор'], ...Object.entries(PMTDraw.NAMES).map(([k, n]) => [k, G[k], n])]
       .map(([k, g, n]) => `<button data-tool="${k}" title="${n}"${k === 'cursor' ? ' class="on"' : ''}>${g}</button>`).join('');
     $('#tools').onclick = (e) => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); };
