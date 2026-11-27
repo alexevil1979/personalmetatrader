@@ -198,7 +198,7 @@
   // ---------- Built-in Indicator Overlays: Clouds, Volume Profile Histogram, Session Bands ----------
   class BuiltInOverlay {
     constructor(pane) {
-      this.pane = pane; this.clouds = []; this.profiles = []; this.bgs = []; this.series = null;
+      this.pane = pane; this.clouds = []; this.profiles = []; this.bgs = []; this.boxes = []; this.series = null;
       const self = this;
       this.prim = {
         attached(p) { self.reqUpd = p.requestUpdate; }, detached() {}, updateAllViews() {},
@@ -209,8 +209,8 @@
     }
     attach() { if (this.series) { try { this.series.detachPrimitive(this.prim); } catch { /* gone */ } } this.series = this.pane.main; if (this.series) this.series.attachPrimitive(this.prim); }
     request() { if (this.reqUpd) this.reqUpd(); }
-    setData({ clouds = [], profiles = [], bgs = [] }) { this.clouds = clouds; this.profiles = profiles; this.bgs = bgs; this.request(); }
-    clear() { this.clouds = []; this.profiles = []; this.bgs = []; this.request(); }
+    setData({ clouds = [], profiles = [], bgs = [], boxes = [] }) { this.clouds = clouds; this.profiles = profiles; this.bgs = bgs; this.boxes = boxes; this.request(); }
+    clear() { this.clouds = []; this.profiles = []; this.bgs = []; this.boxes = []; this.request(); }
 
     draw(ctx, mediaSize) {
       if (!this.series || !this.pane.candles.length) return;
@@ -289,6 +289,22 @@
             ctx.fillStyle = '#ff9800';
             ctx.fillRect(rx - totalW, top + h / 2 - 1, totalW, 2);
           }
+        }
+      }
+      // 4. Smart Money Zone Boxes (FVG / Order Blocks)
+      for (const bx of this.boxes) {
+        const x1 = X(bx.from), x2 = bx.to >= 0 ? X(bx.to) : W;
+        const y1 = Y(bx.top), y2 = Y(bx.bottom);
+        if (x1 === null || x2 === null || y1 === null || y2 === null || x2 < 0 || x1 > W) continue;
+        const left = Math.max(-4, x1), right = Math.min(W + 4, Math.max(x1 + 12, x2));
+        const top = Math.min(y1, y2), h = Math.max(2, Math.abs(y2 - y1));
+        if (bx.fill) { ctx.fillStyle = bx.fill; ctx.fillRect(left, top, right - left, h); }
+        if (bx.border) { ctx.strokeStyle = bx.border; ctx.lineWidth = 1; ctx.strokeRect(left, top, right - left, h); }
+        if (bx.label && h >= 10) {
+          ctx.font = 'bold 9px "Segoe UI",Arial,sans-serif';
+          ctx.fillStyle = bx.border || '#d1d4dc';
+          ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          ctx.fillText(bx.label, left + 4, top + h / 2);
         }
       }
       ctx.restore();

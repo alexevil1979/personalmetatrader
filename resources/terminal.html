@@ -96,6 +96,12 @@
       <button id="watchClose" title="Скрыть панель (кнопка «Обзор» в шапке вернёт её)">✕</button>
     </div>
     <div id="watchPan">
+      <div class="wl-bar">
+        <select id="watchListSel" title="Список наблюдения"></select>
+        <button id="wlNewBtn" type="button" title="Новый список">+</button>
+        <button id="wlDelBtn" type="button" title="Удалить текущий список">🗑</button>
+        <button id="wlIoBtn" type="button" title="Импорт / экспорт символов">⇅</button>
+      </div>
       <div class="wbar"><input id="watchFilter" placeholder="Фильтр"><button id="watchAddBtn" title="Добавить символ в Watchlist">+</button></div>
       <div id="watchFlags" class="wflags">
         <button data-wf="all" class="on">Все</button>
@@ -127,6 +133,7 @@
     </div>
   </aside>
   <div id="workCol">
+    <div id="favToolsBar"></div>
     <div id="replayBar" class="hidden">
       <span class="rp-badge">⏪ СИМУЛЯТОР</span>
       <button id="rpCutBtn" type="button" title="Выбрать стартовый бар на графике">✂ Выбрать бар</button>
@@ -226,6 +233,11 @@
                 <label id="ppPriceWrap" class="hidden">Цена <input id="ppPrice" type="number" step="any"></label>
                 <label>Stop Loss <input id="ppSl" type="number" step="any" placeholder="необяз."></label>
                 <label>Take Profit <input id="ppTp" type="number" step="any" placeholder="необяз."></label>
+              </div>
+              <div class="pp-risk">
+                <label>Риск % <input id="ppRiskPct" type="number" step="0.1" value="1" min="0.1" max="50"></label>
+                <button id="ppCalcQty" type="button" title="Рассчитать объём по Stop Loss">Расчёт</button>
+                <span id="ppRiskOut"></span>
               </div>
               <button id="ppSubmit" class="btnpri" type="button" style="width:100%">Отправить ордер</button>
             </div>
@@ -451,6 +463,11 @@
     <select id="scrMinTurn" title="Мин. оборот 24ч"><option value="0">Любой оборот</option><option value="1000000">&gt; $1M</option><option value="10000000">&gt; $10M</option><option value="50000000">&gt; $50M</option><option value="100000000">&gt; $100M</option></select>
     <button id="scrRefresh">Обновить</button>
     <label class="chk"><input type="checkbox" id="scrAuto" checked> авто 5с</label>
+    <span class="grow"></span>
+    <div class="symtabs" style="padding:0;border:none">
+      <button id="scrViewTbl" class="on" type="button">Таблица</button>
+      <button id="scrViewMap" type="button">🔥 Карта рынка</button>
+    </div>
   </div>
   <div id="scrPresets" class="symtabs" style="padding:0 0 6px">
     <button data-sp="turn" class="on">Топ оборота</button>
@@ -470,6 +487,7 @@
       <tbody id="scrBody"></tbody>
     </table>
   </div>
+  <div id="scrHeatmap" class="hm-grid hidden"></div>
 </div></div>
 
 <div id="tfQuickDlg" class="dlg hidden"><div class="dlgbox gotobox">

@@ -44,5 +44,9 @@ assert.ok(Array.isArray(REG.ichimoku.clouds) && REG.ichimoku.clouds.length === 1
 assert.ok(Array.isArray(REG.bb.clouds) && REG.bb.clouds.length === 1);
 const vp = REG.vprofile.calc(data, defaults('vprofile'), { from: 100, to: 300 });
 assert.ok(vp.profile && vp.profile.bins.length === 24 && vp.profile.pocIdx >= 0);
-assert.ok(Object.keys(REG).length >= 39, 'expected >= 39 indicators');
+const fvg = REG.fvg.calc(data, { minPct: 0.01, maxZones: 10 });
+assert.ok(Array.isArray(fvg.boxes), 'fvg returns zone boxes');
+const smc = REG.smc.calc(data, defaults('smc'));
+assert.ok(Array.isArray(smc.levels) && Array.isArray(smc.markers), 'smc returns BOS/CHoCH levels and markers');
+assert.ok(Object.keys(REG).length >= 42, 'expected >= 42 indicators');
 console.log('OK:', Object.keys(REG).length, 'indicators');

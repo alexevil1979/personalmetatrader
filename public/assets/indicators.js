@@ -417,6 +417,78 @@
       return { markers: mk, bg };
     });
 
+  add('fvg', 'Fair Value Gaps (FVG)', 'Smart Money', true, [P('minPct', 'Мин. гэп %', 0.15, { min: 0, step: 0.05 }), P('maxZones', 'Макс. зон', 16, { min: 2, max: 40 })],
+    [O('markers', 'FVG', '#26a69a', 'markers')], (c, p) => {
+      const boxes = [], n = c.length;
+      for (let i = 2; i < n; i++) {
+        if (c[i].low > c[i - 2].high && c[i - 2].high > 0) {
+          const gapPct = ((c[i].low - c[i - 2].high) / c[i - 2].high) * 100;
+          if (gapPct >= p.minPct) {
+            let to = -1;
+            for (let j = i + 1; j < n; j++) { if (c[j].low <= c[i - 2].high) { to = j; break; } }
+            boxes.push({ from: i - 2, to, top: c[i].low, bottom: c[i - 2].high, fill: 'rgba(38,166,154,0.18)', border: 'rgba(38,166,154,0.55)', label: 'FVG+' });
+          }
+        } else if (c[i].high < c[i - 2].low && c[i - 2].low > 0) {
+          const gapPct = ((c[i - 2].low - c[i].high) / c[i - 2].low) * 100;
+          if (gapPct >= p.minPct) {
+            let to = -1;
+            for (let j = i + 1; j < n; j++) { if (c[j].high >= c[i - 2].low) { to = j; break; } }
+            boxes.push({ from: i - 2, to, top: c[i - 2].low, bottom: c[i].high, fill: 'rgba(239,83,80,0.18)', border: 'rgba(239,83,80,0.55)', label: 'FVG-' });
+          }
+        }
+      }
+      return { markers: [], boxes: boxes.slice(-p.maxZones) };
+    });
+
+  add('smc', 'Market Structure (BOS/CHoCH)', 'Smart Money', true, [P('len', 'Свинг баров', 5, { min: 2, max: 25 })],
+    [O('levels', 'Структура', '#2962ff', 'levels'), O('markers', 'Сигналы', '#ff9800', 'markers')], (c, p) => {
+      const L = Math.max(2, Math.round(p.len)), n = c.length, levels = [], markers = [];
+      let lastHi = null, lastLo = null, trend = 0;
+      for (let i = L * 2; i < n; i++) {
+        const pi = i - L;
+        let isHi = true, isLo = true;
+        for (let k = pi - L; k <= pi + L; k++) {
+          if (k === pi) continue;
+          if (c[k].high >= c[pi].high) isHi = false;
+          if (c[k].low <= c[pi].low) isLo = false;
+        }
+        if (isHi) lastHi = { i: pi, v: c[pi].high, broken: false };
+        if (isLo) lastLo = { i: pi, v: c[pi].low, broken: false };
+        if (lastHi && !lastHi.broken && c[i].close > lastHi.v) {
+          lastHi.broken = true;
+          const kind = trend === -1 ? 'CHoCH' : 'BOS';
+          trend = 1;
+          levels.push({ from: lastHi.i, value: lastHi.v, label: kind, color: '#26a69a' });
+          markers.push({ i, pos: 'below', color: '#26a69a', text: kind });
+        }
+        if (lastLo && !lastLo.broken && c[i].close < lastLo.v) {
+          lastLo.broken = true;
+          const kind = trend === 1 ? 'CHoCH' : 'BOS';
+          trend = -1;
+          levels.push({ from: lastLo.i, value: lastLo.v, label: kind, color: '#ef5350' });
+          markers.push({ i, pos: 'above', color: '#ef5350', text: kind });
+        }
+      }
+      return { levels: levels.slice(-24), markers: markers.slice(-30) };
+    });
+
+  add('linreg', 'Linear Regression Channel', 'Каналы', true, [P('len', 'Период', 50, { min: 5, max: 300 }), P('mult', 'Множитель σ', 2, { min: 0.5, step: 0.25 })],
+    [O('mid', 'Mid', '#2962ff'), O('up', 'Upper', '#26a69a'), O('dn', 'Lower', '#ef5350')], (c, p) => {
+      const n = c.length, len = Math.max(2, Math.round(p.len)), mid = nul(n), up = nul(n), dn = nul(n);
+      const sx = (len * (len - 1)) / 2, sxx = ((len - 1) * len * (2 * len - 1)) / 6, denom = len * sxx - sx * sx;
+      for (let i = len - 1; i < n; i++) {
+        let sy = 0, sxy = 0;
+        for (let k = 0; k < len; k++) { const y = c[i - len + 1 + k].close; sy += y; sxy += k * y; }
+        const slope = denom ? (len * sxy - sx * sy) / denom : 0, intercept = (sy - slope * sx) / len;
+        const m = intercept + slope * (len - 1);
+        let rv = 0;
+        for (let k = 0; k < len; k++) { const e = c[i - len + 1 + k].close - (intercept + slope * k); rv += e * e; }
+        const sd = Math.sqrt(rv / len);
+        mid[i] = m; up[i] = m + p.mult * sd; dn[i] = m - p.mult * sd;
+      }
+      return { mid, up, dn };
+    }, { clouds: [{ a: 'up', b: 'dn', upColor: 'rgba(41,98,255,0.08)' }] });
+
   const defaults = (id) => Object.fromEntries(REG[id].params.map((q) => [q.k, q.def]));
   const api = { M, REG, defaults, source };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else window.PMTInd = api;

@@ -297,6 +297,28 @@
         if (px) $('#ppPrice').value = px;
       }
     };
+    $('#ppCalcQty').onclick = () => {
+      if (!acct) return;
+      const p = hooks.getPane(); if (!p) return;
+      const entry = $('#ppType').value === 'market' ? curPriceFor(p.cfg.category, p.cfg.symbol) : parseFloat($('#ppPrice').value);
+      const sl = parseFloat($('#ppSl').value);
+      const riskPct = Math.max(0.05, parseFloat($('#ppRiskPct').value) || 1);
+      if (!entry || !Number.isFinite(sl) || Math.abs(entry - sl) <= 0) {
+        hooks.toast('Укажите Stop Loss и цену входа для расчёта риска', 'err');
+        return;
+      }
+      let upl = 0;
+      for (const pos of acct.positions) {
+        const px = curPriceFor(pos.category, pos.symbol);
+        if (px !== null) upl += (pos.side === 'long' ? 1 : -1) * (px - pos.entry_price) * pos.qty;
+      }
+      const eq = Math.max(0, acct.balance + upl), riskUsd = (eq * riskPct) / 100;
+      const dist = Math.abs(entry - sl), qty = +(riskUsd / dist).toFixed(4);
+      $('#ppQty').value = String(qty);
+      const tp = parseFloat($('#ppTp').value);
+      const rr = Number.isFinite(tp) && tp > 0 ? ` · R:R ${(Math.abs(tp - entry) / dist).toFixed(2)}` : '';
+      $('#ppRiskOut').textContent = `Риск $${nf(riskUsd)} · Объём ${qty}${rr}`;
+    };
     $('#ppSubTabs').onclick = (e) => {
       const b = e.target.closest('[data-pt]'); if (!b) return;
       ppSub = b.dataset.pt;

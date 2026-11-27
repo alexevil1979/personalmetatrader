@@ -350,3 +350,19 @@ body.nolegend .pane .ohlc{display:none}
 .qtrade input{width:52px;padding:2px 4px;text-align:center;font-size:11px}
 .hk-grid{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:12px;align-items:center}
 .hk-grid kbd{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font:11px Consolas,monospace}
+.wl-bar{display:flex;gap:3px;padding:4px 4px 0}
+.wl-bar select{flex:1;min-width:0;padding:2px 5px;font-size:11px}
+.wl-bar button{padding:2px 6px;font-size:11px}
+.wrow.drag-over{border-top:2px solid var(--acc)}
+.pp-risk{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--mut)}
+.pp-risk label{display:flex;align-items:center;gap:4px}
+.pp-risk input{width:54px;padding:2px 4px}
+.pp-risk button{padding:3px 7px;font-size:11px}
+#favToolsBar{display:flex;align-items:center;gap:3px;padding:3px 8px;background:var(--panel);border-bottom:1px solid var(--line);font-size:11px;flex-wrap:wrap}
+#favToolsBar:empty{display:none}
+#favToolsBar .ft-lbl{color:var(--mut);font-size:10px;margin-right:4px}
+#favToolsBar button{padding:2px 7px;font-size:11px}
+.hm-grid{flex:1;overflow:auto;display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start;padding:2px}
+.hm-tile{display:flex;flex-direction:column;justify-content:center;align-items:center;border:1px solid var(--line);border-radius:5px;padding:6px;cursor:pointer;text-align:center;transition:transform .12s,border-color .12s;overflow:hidden}
+.hm-tile:hover{border-color:#fff;transform:scale(1.01)}
+.hm-tile b{font-size:12px}.hm-tile span{font-size:12px;font-weight:700}.hm-tile small{font-size:10px;opacity:.85}

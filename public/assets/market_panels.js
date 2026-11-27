@@ -109,8 +109,8 @@
     }
   }
 
-  // ---------- Bybit Crypto Screener ----------
-  let scrHooks = null, scrSort = 'turn24', scrDir = 'desc', scrPreset = 'turn', scrTimer = null, scrRows = [];
+  // ---------- Bybit Crypto Screener + Market Heatmap ----------
+  let scrHooks = null, scrSort = 'turn24', scrDir = 'desc', scrPreset = 'turn', scrTimer = null, scrRows = [], scrView = 'tbl';
   const PRESETS = {
     turn: { sort: 'turn24', dir: 'desc', minChg: '', maxChg: '' },
     gain: { sort: 'chg24', dir: 'desc', minChg: '2', maxChg: '' },
@@ -119,6 +119,25 @@
     fneg: { sort: 'funding', dir: 'asc', minChg: '', maxChg: '' },
     vol: { sort: 'rangePct', dir: 'desc', minChg: '', maxChg: '' },
   };
+  function heatColor(chg) {
+    const t = Math.min(1, Math.abs(chg) / 8);
+    return chg >= 0
+      ? `rgba(38,166,154,${(0.18 + t * 0.62).toFixed(2)})`
+      : `rgba(239,83,80,${(0.18 + t * 0.62).toFixed(2)})`;
+  }
+  function renderHeatmap(rows) {
+    const el = $('#scrHeatmap'); if (!el) return;
+    const top = rows.slice(0, 60);
+    if (!top.length) { el.innerHTML = '<div style="padding:20px;color:var(--mut)">Нет данных для карты</div>'; return; }
+    const weights = top.map((x) => Math.sqrt(Math.max(1e4, +x.turn24 || 1e4)));
+    const maxW = Math.max(...weights, 1);
+    el.innerHTML = top.map((x, idx) => {
+      const basis = Math.max(90, Math.min(260, Math.round((weights[idx] / maxW) * 250)));
+      const h = Math.max(54, Math.round(basis * 0.48));
+      const sg = x.chg24 >= 0 ? '+' : '';
+      return `<div class="hm-tile" data-ssym="${esc(x.symbol)}" style="flex:1 1 ${basis}px;min-height:${h}px;background:${heatColor(x.chg24)}"><b>${esc(x.symbol.replace(/USDT$|USDC$|USD$/, ''))}</b><span>${sg}${x.chg24.toFixed(2)}%</span><small>${x.last ?? '—'} · $${fmtCompact(x.turn24)}</small></div>`;
+    }).join('');
+  }
   async function loadScreener() {
     if (!scrHooks || $('#screenerDlg').classList.contains('hidden')) return;
     const p = PRESETS[scrPreset] || {};
@@ -141,6 +160,7 @@
         const fr = x.funding !== null ? `<span class="${x.funding >= 0 ? 'up' : 'dn'}">${x.funding.toFixed(4)}%</span>` : '—';
         return `<tr data-ssym="${esc(x.symbol)}"><td><b>${esc(x.symbol)}</b></td><td>${x.last ?? '—'}</td><td class="${cls}">${x.chg24 >= 0 ? '+' : ''}${x.chg24.toFixed(2)}%</td><td>${fmtCompact(x.turn24)}</td><td>${x.rangePct.toFixed(2)}%</td><td>${fr}</td><td>${x.oi !== null ? fmtCompact(x.oi) : '—'}</td><td>${x.spreadPct.toFixed(3)}%</td><td><button type="button" data-sadd="${esc(x.symbol)}" title="В Watchlist">+</button></td></tr>`;
       }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--mut);padding:16px">Нет совпадений</td></tr>';
+      if (scrView === 'map') renderHeatmap(scrRows);
     } catch (e) { $('#scrMeta').textContent = 'Ошибка: ' + e.message; }
   }
   function wireScreener(hooks) {
@@ -180,6 +200,20 @@
       if (add) { e.stopPropagation(); hooks.addWatch($('#scrCat').value, add.dataset.sadd); return; }
       const tr = e.target.closest('[data-ssym]');
       if (tr) { close(); hooks.pickSymbol($('#scrCat').value, tr.dataset.ssym); }
+    };
+    const setView = (v) => {
+      scrView = v;
+      $('#scrViewTbl').classList.toggle('on', v === 'tbl');
+      $('#scrViewMap').classList.toggle('on', v === 'map');
+      $('.scr-wrap').classList.toggle('hidden', v !== 'tbl');
+      $('#scrHeatmap').classList.toggle('hidden', v !== 'map');
+      if (v === 'map') renderHeatmap(scrRows);
+    };
+    $('#scrViewTbl').onclick = () => setView('tbl');
+    $('#scrViewMap').onclick = () => setView('map');
+    $('#scrHeatmap').onclick = (e) => {
+      const t = e.target.closest('[data-ssym]');
+      if (t) { close(); hooks.pickSymbol($('#scrCat').value, t.dataset.ssym); }
     };
   }
 

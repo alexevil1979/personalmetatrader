@@ -16,11 +16,12 @@
   };
 
   const DEF_CHART_OPTS = { upColor: '', dnColor: '', showGrid: true, watermark: true, magnetCross: false, showQuickTrade: false };
+  const DEF_FAV_TOOLS = ['trend', 'hline', 'fibret', 'rect', 'longpos'];
   const state = {
     category: 'linear', theme: 'dark', tz: 'UTC', layout: '1',
     syncOpts: { symbol: false, tf: false, crosshair: false, range: false },
-    splits: {}, layoutName: '', favInds: [], chartOpts: { ...DEF_CHART_OPTS },
-    watch: {}, watchFlags: {}, showWatch: true, showInfo: true, showLegend: true, panes: [],
+    splits: {}, layoutName: '', favInds: [], favTools: DEF_FAV_TOOLS.slice(), chartOpts: { ...DEF_CHART_OPTS },
+    watch: {}, watchLists: {}, watchFlags: {}, showWatch: true, showInfo: true, showLegend: true, panes: [],
   };
   const normLayout = (v) => (v === 2 || v === '2' ? '2v' : LAYOUT_LABELS[String(v)] ? String(v) : '1');
   function applyStatePatch(src) {
@@ -34,8 +35,10 @@
     delete state.sync;
     if (!state.splits || typeof state.splits !== 'object') state.splits = {};
     if (!Array.isArray(state.favInds)) state.favInds = [];
+    if (!Array.isArray(state.favTools)) state.favTools = DEF_FAV_TOOLS.slice();
     state.chartOpts = { ...DEF_CHART_OPTS, ...(state.chartOpts && typeof state.chartOpts === 'object' ? state.chartOpts : {}) };
     if (!state.watch || typeof state.watch !== 'object') state.watch = {};
+    if (!state.watchLists || typeof state.watchLists !== 'object') state.watchLists = {};
     if (!state.watchFlags || typeof state.watchFlags !== 'object') state.watchFlags = {};
     if (!Array.isArray(state.panes)) state.panes = [];
   }
@@ -665,7 +668,15 @@
         this.wmEl.textContent = `${this.cfg.symbol} · ${this.tfLabel()}`;
       }
       if (this.qtEl) this.qtEl.classList.toggle('hidden', !o.showQuickTrade);
+      this.updateQuickTrade();
       if (this.main) this.buildSeries();
+    }
+    updateQuickTrade() {
+      if (!this.qtEl) return;
+      const t = tickers[this.cfg.symbol], last = this.candles.length ? this.candles[this.candles.length - 1].close : null;
+      const sellPx = (t && t.bid) || last, buyPx = (t && t.ask) || last;
+      this.qtEl.querySelector('.qt-sell').textContent = sellPx !== null && sellPx !== undefined ? `SELL ${sellPx}` : 'SELL';
+      this.qtEl.querySelector('.qt-buy').textContent = buyPx !== null && buyPx !== undefined ? `BUY ${buyPx}` : 'BUY';
     }
     clearCompares() {
       for (const c of this.cmpSeries) { try { this.chart.removeSeries(c.series); } catch { /* gone */ } }
@@ -734,6 +745,7 @@
     volData(c) { const t = chartTheme(); return c.map((k) => ({ time: k.time, value: k.volume, color: (k.close >= k.open ? t.up : t.dn) + '66' })); }
     render() {
       if (this.wmEl) this.wmEl.textContent = `${this.cfg.symbol} · ${this.tfLabel()}`;
+      this.updateQuickTrade();
       if (this.cfg.type === 'baseline' && this.candles.length) {
         this.main.applyOptions({ baseValue: { type: 'price', price: this.candles[0].close } });
       }
@@ -803,6 +815,7 @@
         this.vol.update(this.volData([c])[0]);
         this.scheduleInd(!last || c.time !== last.time);
         if (!this.lastCrossTime) this.cross(null);
+        this.updateQuickTrade();
         if (window.PMTTrade) PMTTrade.onBarTick(this.cfg.category, this.cfg.symbol, c, false);
       }
     }
@@ -813,6 +826,7 @@
       this.replay = { all, idx: cut };
       this.candles = all.slice(0, cut + 1);
       this.render();
+      this.updateQuickTrade();
       this.chart.timeScale().scrollToRealTime();
     }
     stepReplay() {
@@ -825,6 +839,7 @@
       this.vol.update(this.volData([c])[0]);
       this.scheduleInd(true);
       this.cross(null);
+      this.updateQuickTrade();
       if (window.PMTTrade) PMTTrade.onBarTick(this.cfg.category, this.cfg.symbol, c, true);
       return this.replay.idx + 1 < this.replay.all.length;
     }
@@ -896,7 +911,7 @@
       let lr = null; try { lr = this.chart.timeScale().getVisibleLogicalRange(); } catch { /* ignore */ }
       const off = this.dw.off(), vis = lr ? { from: lr.from - off, to: lr.to - off } : null;
       let paneIdx = 0; const markers = [];
-      const clouds = [], profiles = [], bgs = [];
+      const clouds = [], profiles = [], bgs = [], boxes = [];
       for (const inst of this.cfg.indicators) {
         if (inst.visible === false) continue;
         if (inst.type === 'mql') { const r = this.mqlItem(inst, full, paneIdx, markers); if (r === 'sep') paneIdx++; continue; }
@@ -911,6 +926,7 @@
         }
         if (out.profile) profiles.push(out.profile);
         if (out.bg) bgs.push(out.bg);
+        if (Array.isArray(out.boxes)) boxes.push(...out.boxes);
         for (const o of def.outputs) {
           const arr = out[o.k];
           if (o.type === 'levels') {
@@ -934,7 +950,7 @@
           }
         }
       }
-      this.bov.setData({ clouds, profiles, bgs });
+      this.bov.setData({ clouds, profiles, bgs, boxes });
       markers.sort((a, b) => a.time - b.time);
       if (markers.length || this.mk) { if (!this.mk) this.mk = LightweightCharts.createSeriesMarkers(this.main, []); this.mk.setMarkers(markers); }
       if (full && paneIdx > 0) { try { this.chart.panes()[0].setStretchFactor(3); } catch { /* old api */ } }
@@ -1199,7 +1215,7 @@
       defaultCat: 'all',
       initialQuery,
       onPick: (item) => {
-        const w = state.watch[item.category] || (state.watch[item.category] = DEFAULT_WATCH.slice());
+        const w = watchFor(item.category);
         if (!w.includes(item.symbol)) w.push(item.symbol);
         state.category = item.category;
         applyToPanes({ category: item.category, symbol: item.symbol });
@@ -1266,8 +1282,26 @@
     PMTUx.toast('Загружен макет: ' + l.name, 'ok');
   }
 
-  // ---------- watchlist pro + live WS tickers ----------
-  const watchFor = (cat) => state.watch[cat] || (state.watch[cat] = DEFAULT_WATCH.slice());
+  // ---------- watchlist pro + multi-lists + live WS tickers ----------
+  function watchStateFor(cat) {
+    let ws = state.watchLists[cat];
+    if (!ws || !ws.lists || typeof ws.lists !== 'object') {
+      const seed = Array.isArray(state.watch[cat]) && state.watch[cat].length ? state.watch[cat].slice() : DEFAULT_WATCH.slice();
+      ws = state.watchLists[cat] = { active: 'Основной', lists: { 'Основной': seed } };
+    }
+    if (!Object.keys(ws.lists).length) ws.lists['Основной'] = DEFAULT_WATCH.slice();
+    if (!ws.lists[ws.active]) ws.active = Object.keys(ws.lists)[0];
+    return ws;
+  }
+  const watchFor = (cat) => {
+    const ws = watchStateFor(cat);
+    return (state.watch[cat] = ws.lists[ws.active]);
+  };
+  const setWatchArr = (cat, arr) => {
+    const ws = watchStateFor(cat);
+    ws.lists[ws.active] = arr;
+    state.watch[cat] = arr;
+  };
   const FLAG_COLORS = { red: '#ef5350', green: '#26a69a', blue: '#2962ff', orange: '#ff9800', purple: '#ab47bc' };
   const flagFor = (cat, s) => (state.watchFlags[cat] && state.watchFlags[cat][s]) || '';
   function setWatchFlag(cat, s, color) {
@@ -1308,6 +1342,7 @@
       }
     }
     if (panes[active] && panes[active].cfg.symbol === sym) updateInfo();
+    panes.forEach((p) => { if (p.cfg.symbol === sym) p.updateQuickTrade(); });
     if (window.PMTTrade && d.lastPrice !== undefined && panes[active]) PMTTrade.onLiveTick(panes[active].cfg.category, sym, t.last);
   }
   function syncWatchWs() {
@@ -1327,8 +1362,12 @@
   }
   function renderWatch() {
     if (!panes[active]) return;
-    const cat = panes[active].cfg.category, f = $('#watchFilter').value.trim().toUpperCase();
+    const cat = panes[active].cfg.category, ws = watchStateFor(cat), f = $('#watchFilter').value.trim().toUpperCase();
     const sel = panes[active].cfg.symbol;
+    const wlSel = $('#watchListSel');
+    if (wlSel) {
+      wlSel.innerHTML = Object.keys(ws.lists).map((nm) => `<option value="${esc(nm)}"${nm === ws.active ? ' selected' : ''}>${esc(nm)} (${ws.lists[nm].length})</option>`).join('');
+    }
     let items = watchFor(cat).filter((s) => s.includes(f) && (watchFlagFilter === 'all' || flagFor(cat, s) === watchFlagFilter));
     if (watchSort.col) {
       items = items.slice().sort((a, b) => {
@@ -1338,10 +1377,11 @@
         return (va - vb) * watchSort.dir;
       });
     }
+    const drag = watchSort.col === null ? ' draggable="true"' : '';
     $('#watchList').innerHTML = items.map((s) => {
       const t = tickers[s], chg = t ? (t.chg24 * 100) : null, fl = flagFor(cat, s);
       const bar = fl ? `<span class="wflag-bar" style="background:${FLAG_COLORS[fl]}"></span>` : '';
-      return `<div class="wrow${s === sel ? ' sel' : ''}" data-s="${s}"><span>${bar}${s}</span><span class="wv ${chg >= 0 ? 'up' : 'dn'}">${t ? t.last + ' ' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%' : ''}</span></div>`;
+      return `<div class="wrow${s === sel ? ' sel' : ''}" data-s="${s}"${drag}><span>${bar}${s}</span><span class="wv ${chg >= 0 ? 'up' : 'dn'}">${t ? t.last + ' ' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%' : ''}</span></div>`;
     }).join('') || '<div style="padding:10px;color:var(--mut);text-align:center">Пусто</div>';
   }
   async function pollTickers() {
@@ -1484,7 +1524,30 @@
         syncToolStates();
       }
     };
+    el.addEventListener('contextmenu', (e) => {
+      const mi = e.target.closest('.pt-pop .mi');
+      if (!mi) return;
+      e.preventDefault(); e.stopPropagation();
+      const t = mi.dataset.tool, idx = state.favTools.indexOf(t);
+      if (idx >= 0) { state.favTools.splice(idx, 1); PMTUx.toast('Убрано из избранных инструментов'); }
+      else { state.favTools.push(t); PMTUx.toast('Добавлено в избранные: ' + (PMTDraw.NAMES[t] || t), 'ok'); }
+      save(); renderFavTools();
+    });
     p.el.appendChild(el);
+  }
+  function renderFavTools() {
+    const bar = $('#favToolsBar'); if (!bar) return;
+    if (!state.favTools || !state.favTools.length) { bar.innerHTML = ''; return; }
+    bar.innerHTML = '<span class="ft-lbl">★ Инструменты:</span>' + state.favTools.filter((t) => TOOL_GLYPHS[t]).map((t) =>
+      `<button type="button" data-ftool="${t}" class="${tool === t ? 'on' : ''}" title="${esc(PMTDraw.NAMES[t] || t)} (ПКМ — убрать)">${TOOL_GLYPHS[t]}</button>`
+    ).join('');
+    bar.onclick = (e) => { const b = e.target.closest('[data-ftool]'); if (b) setTool(b.dataset.ftool); };
+    bar.oncontextmenu = (e) => {
+      const b = e.target.closest('[data-ftool]'); if (!b) return;
+      e.preventDefault();
+      state.favTools = state.favTools.filter((x) => x !== b.dataset.ftool);
+      save(); renderFavTools();
+    };
   }
   function syncToolStates() {
     document.querySelectorAll('.pTools [data-act="magnet"]').forEach((b) => { b.classList.toggle('on', magnetMode !== 'off'); b.textContent = magnetMode === 'strong' ? '🧲!' : '🧲'; });
@@ -1533,6 +1596,7 @@
       if (has) g.querySelector('.pt-gbtn').textContent = TOOL_GLYPHS[t];
     });
     panes.forEach((p) => { if (t === 'cursor') p.dw.creating = null; p.cv.style.cursor = t === 'cursor' ? '' : 'crosshair'; p.dw.request(); });
+    renderFavTools();
   }
   function setRuler(on) {
     rulerMode = on;
@@ -2316,6 +2380,78 @@ if showLabels and ta.crossunder(close, ma)
     $('#theme').value = state.theme; $('#theme').onchange = (e) => { state.theme = e.target.value; document.body.classList.toggle('light', state.theme === 'light'); panes.forEach((p) => p.applyTheme()); save(); };
     document.body.classList.toggle('light', state.theme === 'light');
     $('#watchFilter').oninput = renderWatch;
+    $('#watchListSel').onchange = (e) => {
+      const cat = panes[active] ? panes[active].cfg.category : state.category;
+      watchStateFor(cat).active = e.target.value;
+      save(); renderWatch(); syncWatchWs(); pollTickers();
+    };
+    $('#wlNewBtn').onclick = () => {
+      const cat = panes[active] ? panes[active].cfg.category : state.category;
+      const nm = (prompt('Название нового списка:', '') || '').trim();
+      if (!nm) return;
+      const ws = watchStateFor(cat);
+      if (!ws.lists[nm]) ws.lists[nm] = [];
+      ws.active = nm;
+      save(); renderWatch(); syncWatchWs();
+    };
+    $('#wlDelBtn').onclick = () => {
+      const cat = panes[active] ? panes[active].cfg.category : state.category;
+      const ws = watchStateFor(cat), keys = Object.keys(ws.lists);
+      if (keys.length <= 1) { PMTUx.toast('Нельзя удалить последний список', 'err'); return; }
+      if (!confirm(`Удалить список «${ws.active}»?`)) return;
+      delete ws.lists[ws.active];
+      ws.active = Object.keys(ws.lists)[0];
+      save(); renderWatch(); syncWatchWs();
+    };
+    $('#wlIoBtn').onclick = () => {
+      const cat = panes[active] ? panes[active].cfg.category : state.category;
+      const cur = watchFor(cat).join(', ');
+      const next = prompt('Символы списка через запятую (можно редактировать для импорта):', cur);
+      if (next === null) return;
+      const parsed = [...new Set(next.toUpperCase().split(/[\s,;]+/).map((x) => x.trim()).filter((x) => /^[A-Z0-9]{2,30}$/.test(x)))];
+      setWatchArr(cat, parsed);
+      save(); renderWatch(); syncWatchWs(); pollTickers();
+      PMTUx.toast(`Список обновлён (${parsed.length} символов)`, 'ok');
+    };
+    let wlDragSym = null;
+    $('#watchList').addEventListener('dragstart', (e) => {
+      const r = e.target.closest('.wrow');
+      if (!r || watchSort.col !== null) return;
+      wlDragSym = r.dataset.s;
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    $('#watchList').addEventListener('dragover', (e) => {
+      if (!wlDragSym) return;
+      const r = e.target.closest('.wrow');
+      if (r && r.dataset.s !== wlDragSym) {
+        e.preventDefault();
+        $('#watchList').querySelectorAll('.drag-over').forEach((x) => x.classList.remove('drag-over'));
+        r.classList.add('drag-over');
+      }
+    });
+    $('#watchList').addEventListener('dragleave', (e) => {
+      const r = e.target.closest('.wrow');
+      if (r) r.classList.remove('drag-over');
+    });
+    $('#watchList').addEventListener('drop', (e) => {
+      const r = e.target.closest('.wrow');
+      $('#watchList').querySelectorAll('.drag-over').forEach((x) => x.classList.remove('drag-over'));
+      if (!r || !wlDragSym || r.dataset.s === wlDragSym) { wlDragSym = null; return; }
+      e.preventDefault();
+      const cat = panes[active].cfg.category, arr = watchFor(cat).slice();
+      const from = arr.indexOf(wlDragSym), to = arr.indexOf(r.dataset.s);
+      if (from >= 0 && to >= 0) {
+        arr.splice(from, 1);
+        arr.splice(to, 0, wlDragSym);
+        setWatchArr(cat, arr);
+        save(); renderWatch();
+      }
+      wlDragSym = null;
+    });
+    $('#watchList').addEventListener('dragend', () => {
+      wlDragSym = null;
+      $('#watchList').querySelectorAll('.drag-over').forEach((x) => x.classList.remove('drag-over'));
+    });
     $('#watchAddBtn').onclick = () => {
       const cat = panes[active] ? panes[active].cfg.category : state.category;
       PMTUx.openSymbolSearch({
@@ -2368,7 +2504,7 @@ if showLabels and ta.crossunder(close, ma)
         const fl = ev.target.closest('[data-wfset]');
         if (fl) { setWatchFlag(cat, sym, fl.dataset.wfset); hideWatchMenu(); return; }
         if (ev.target.closest('[data-wrem]')) {
-          state.watch[cat] = watchFor(cat).filter((s) => s !== sym);
+          setWatchArr(cat, watchFor(cat).filter((s) => s !== sym));
           save(); renderWatch(); syncWatchWs(); hideWatchMenu();
         }
       };
@@ -2408,6 +2544,7 @@ if showLabels and ta.crossunder(close, ma)
     const first = state.panes[0] || { category: state.category, symbol: 'BTCUSDT', tf: '60', type: 'candles' };
     $('#category').value = first.category;
     loadSymbols(first.category).catch(() => {}).finally(() => {
+      renderFavTools();
       ensureLayout(); refreshAlerts(true); pollTickers();
       setInterval(pollTickers, 15000);
       setInterval(pollAlertLogs, 12000);
