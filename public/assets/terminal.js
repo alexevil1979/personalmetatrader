@@ -816,6 +816,7 @@ if showLabels and ta.crossunder(close, ma)
     };
     const togg = (btn, el, key) => { const on = state[key]; $(btn).classList.toggle('on', on); $(el).classList.toggle('hidden', !on); $(btn).onclick = () => { state[key] = !state[key]; $(btn).classList.toggle('on', state[key]); $(el).classList.toggle('hidden', !state[key]); save(); panes.forEach((p) => p.chart.resize(p.cv.clientWidth, p.cv.clientHeight)); }; };
     togg('#togWatch', '#watch', 'showWatch'); togg('#togInfo', '#info', 'showInfo');
+    $('#watchClose').onclick = () => $('#togWatch').onclick();
 
     const first = state.panes[0] || { category: state.category, symbol: 'BTCUSDT', tf: '60', type: 'candles' };
     $('#category').value = first.category;

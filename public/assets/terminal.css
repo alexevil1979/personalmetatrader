@@ -19,7 +19,8 @@ button.on{background:var(--acc);border-color:var(--acc);color:#fff}
 main{flex:1;display:flex;min-height:0}
 #watch{width:230px;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
 #watch.hidden,#info.hidden{display:none}
-.panel-title{padding:6px 8px;font-weight:600;border-bottom:1px solid var(--line)}
+.panel-title{padding:2px 4px 2px 8px;font-weight:600;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:4px}
+.panel-title button{padding:0 6px;line-height:1.4}
 #watchFilter{margin:4px;width:calc(100% - 8px)}
 #watchList{overflow:auto;flex:1}
 .wrow{display:flex;justify-content:space-between;padding:3px 8px;cursor:pointer;border-bottom:1px solid var(--line)}
