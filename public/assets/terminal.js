@@ -259,6 +259,7 @@
       host.appendChild(this.el);
       this.cv = this.el.querySelector('.cv'); this.legend = this.el.querySelector('.ohlc'); this.loadEl = this.el.querySelector('.load');
       this.cntEl = this.el.querySelector('.cnt');
+      buildTfbar(this);
       this.el.addEventListener('contextmenu', (e) => {
         let w = 0; try { w = this.chart.priceScale('right').width(); } catch { /* not ready */ }
         const r = this.cv.getBoundingClientRect();
@@ -533,6 +534,7 @@
     if ($('#category').value !== c.category) $('#category').value = c.category;
     $('#symbolInput').value = c.symbol;
     document.querySelectorAll('#tfButtons button').forEach((b) => b.classList.toggle('on', b.dataset.tf === c.tf));
+    panes.forEach((x) => syncTfbar(x));
     document.querySelectorAll('#typeButtons button').forEach((b) => b.classList.toggle('on', b.dataset.type === c.type));
     fillDatalist(c.category); renderWatch(); updateInfo(); updateObjBar();
   }
@@ -634,6 +636,26 @@
   const TOOL_GLYPHS = { hline: '─', vline: '│', trend: '╱', ray: '↗', channel: '▱', rect: '▭', fibret: 'Fib', fibext: 'FbE', fibfan: 'Fan', fibtime: 'FbT', pitchfork: 'Ψ', text: 'T', arrow: '➚', pricelabel: '$', pencil: '✎' };
   const TOOL_BUTTONS = [['cursor', '⌖', 'Курсор / выбор'], ...Object.entries(PMTDraw.NAMES).filter(([k]) => !PMTDraw.SERVICE.includes(k)).map(([k, n]) => [k, TOOL_GLYPHS[k], n])]
     .map(([k, g, n]) => `<button data-tool="${k}" title="${n}"${k === 'cursor' ? ' class="on"' : ''}>${g}</button>`).join('');
+  // per-pane timeframe widget: each chart switches its own TF; the checkbox "синхр." spreads it to all
+  function buildTfbar(p) {
+    const el = document.createElement('div'); el.className = 'tfdd';
+    const menu = TFS.map(([v, n]) => `<div data-tf="${v}">${n}</div>`).join('');
+    el.innerHTML = `<button class="tfc" title="Таймфрейм этого графика">H1 ▾</button><div class="tfm hidden">${menu}</div>`;
+    el.querySelector('.tfc').onclick = (e) => { e.stopPropagation(); el.querySelector('.tfm').classList.toggle('hidden'); };
+    el.querySelector('.tfm').onclick = (e) => {
+      const b = e.target.closest('[data-tf]'); if (!b) return;
+      el.querySelector('.tfm').classList.add('hidden');
+      if (b.dataset.tf !== p.cfg.tf) { const i = panes.indexOf(p); if (i >= 0 && i !== active) setActive(i); applyToPanes({ tf: b.dataset.tf }); }
+    };
+    p.el.appendChild(el);
+    syncTfbar(p);
+  }
+  function syncTfbar(p) {
+    const t = TFS.find((x) => x[0] === p.cfg.tf);
+    const btn = p.el.querySelector('.tfc');
+    if (btn && t) btn.textContent = t[1] + ' ▾';
+    p.el.querySelectorAll('.tfm [data-tf]').forEach((b) => b.classList.toggle('on', b.dataset.tf === p.cfg.tf));
+  }
   // per-pane floating tool strip; the strip belongs to its pane, one tool is shared globally
   function buildTools(p) {
     const el = document.createElement('div'); el.className = 'pTools';
@@ -666,6 +688,7 @@
     $('#objName').textContent = PMTDraw.NAMES[o.type]; $('#objColor').value = PMTDraw.colorOf(o); $('#objWidth').value = o.style.width || 1;
   }
   function wireTools() {
+    document.addEventListener('mousedown', (e) => { if (!e.target.closest('.tfdd')) document.querySelectorAll('.tfdd .tfm').forEach((m) => m.classList.add('hidden')); });
     $('#objColor').oninput = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.color = e.target.value; panes[active].dw.save(); panes[active].dw.request(); } };
     $('#objWidth').onchange = (e) => { const o = panes[active].dw.selected(); if (o) { o.style.width = Math.min(6, Math.max(1, +e.target.value || 1)); panes[active].dw.save(); panes[active].dw.request(); } };
     $('#objDel').onclick = () => { panes[active].dw.remove(); };

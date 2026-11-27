@@ -33,7 +33,13 @@ main{flex:1;display:flex;min-height:0}
 #charts.l4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
 .pane{position:relative;background:var(--bg);min-width:0;min-height:0}
 .pane.active{outline:1px solid var(--acc);outline-offset:-1px}
-.pane .ohlc{position:absolute;left:8px;top:6px;z-index:5;pointer-events:none;font-size:12px}
+.pane .ohlc{position:absolute;left:60px;top:6px;z-index:5;pointer-events:none;font-size:12px}
+.tfdd{position:absolute;left:5px;top:4px;z-index:7}
+.tfdd .tfc{font-size:11px;padding:2px 6px;font-weight:600}
+.tfdd .tfm{position:absolute;top:100%;left:0;margin-top:2px;background:var(--panel);border:1px solid var(--line);border-radius:6px;min-width:64px;max-height:270px;overflow:auto;z-index:8;padding:2px;box-shadow:0 6px 18px #0005}
+.tfdd .tfm div{padding:4px 12px;cursor:pointer;border-radius:4px;white-space:nowrap}
+.tfdd .tfm div:hover{background:var(--bg)}
+.tfdd .tfm div.on{color:var(--acc);font-weight:700}
 body.nolegend .pane .ohlc{display:none}
 .pane .ohlc b{color:var(--acc)}
 .pane .cv{position:absolute;inset:0}
