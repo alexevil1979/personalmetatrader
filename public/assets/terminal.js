@@ -645,7 +645,10 @@
     el.querySelector('.tfm').onclick = (e) => {
       const b = e.target.closest('[data-tf]'); if (!b) return;
       el.querySelector('.tfm').classList.add('hidden');
-      if (b.dataset.tf !== p.cfg.tf) { const i = panes.indexOf(p); if (i >= 0 && i !== active) setActive(i); applyToPanes({ tf: b.dataset.tf }); }
+      if (b.dataset.tf !== p.cfg.tf) { // always only this pane, even with "синхр." on
+        const i = panes.indexOf(p); if (i >= 0 && i !== active) setActive(i);
+        p.set({ tf: b.dataset.tf }); p.load().then(() => p.buildSeries()); p.cross(null); save(); syncTfbar(p);
+      }
     };
     p.el.appendChild(el);
     syncTfbar(p);
