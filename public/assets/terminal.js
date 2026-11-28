@@ -563,6 +563,7 @@
   const drawingMenuHooks = {
     onDrawingAction: (p, o, act) => {
       const st = o.style || (o.style = {});
+      if (act === 'props') { openDrawingProps(p, o); return; }
       if (act === 'clone') { p.dw.select(o.id); p.dw.cloneSelected(); }
       else if (act === 'lock') { p.dw.snapshot(); st.locked = !st.locked; p.dw.save(); p.dw.request(); }
       else if (act === 'hide') { p.dw.snapshot(); st.hidden = !st.hidden; p.dw.save(); p.dw.request(); }
@@ -1150,7 +1151,7 @@
     changeInd() { this.refreshIndicators(true); this.cross(null); }
     set(patch) { Object.assign(this.cfg, patch); }
     precision() { const i = symInfo(this.cfg.category, this.cfg.symbol); return i ? +i.scale : 2; }
-    destroy() { this.dw.destroy(); this.ruler.destroy(); this.unsubscribe(); this.chart.remove(); const b = this.el.querySelector('#objBar'); if (b) document.body.appendChild(b); this.el.remove(); }
+    destroy() { clearTimeout(this.indT); clearTimeout(this.vpT); this.dw.destroy(); this.ruler.destroy(); this.unsubscribe(); this.chart.remove(); const b = this.el.querySelector('#objBar'); if (b) document.body.appendChild(b); this.el.remove(); }
   }
 
   // ---------- Granular Sync (Crosshair + Visible Range) ----------
@@ -1576,6 +1577,7 @@
       else if (a === 'auto') ps.applyOptions({ autoScale: true });
       else if (a === 'm0' || a === 'm1' || a === 'm2') ps.applyOptions({ mode: a === 'm0' ? LC.PriceScaleMode.Normal : a === 'm1' ? LC.PriceScaleMode.Logarithmic : LC.PriceScaleMode.Percentage });
       else if (a === 'l' || a === 'r') { ps.applyOptions({ visible: a === 'r' }); p.chart.priceScale('left').applyOptions({ visible: a === 'l' }); }
+      syncBottomScaleUi(); p.tickCountdown();
       hideScaleMenu();
     };
     setTimeout(() => document.addEventListener('mousedown', hideScaleMenu, { once: true }), 0);
@@ -1963,7 +1965,7 @@ if showLabels and ta.crossunder(close, ma)
 `;
   const PINE_PRO_TEMPLATES = {
     ema_cross: ['EMA Crossover Strategy', `//@version=5\nstrategy("EMA Crossover", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=50, commission_type=strategy.commission.percent, commission_value=0.055)\nfastLen = input.int(9, "Fast EMA", minval=1)\nslowLen = input.int(21, "Slow EMA", minval=2)\nf = ta.ema(close, fastLen)\ns = ta.ema(close, slowLen)\nplot(f, "Fast EMA", color=color.orange, linewidth=2)\nplot(s, "Slow EMA", color=color.blue, linewidth=2)\nif ta.crossover(f, s)\n    strategy.entry("Long", strategy.long)\nif ta.crossunder(f, s)\n    strategy.entry("Short", strategy.short)\n`],
-    rsi_trail: ['RSI Reversion + Trailing', `//@version=5\nstrategy("RSI Trailing", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=30)\nlen = input.int(14, "RSI Length")\nob = input.int(70, "Overbought")\nos = input.int(30, "Oversold")\ntp = input.int(300, "Trail activation (ticks)")\nto = input.int(120, "Trail offset (ticks)")\nr = ta.rsi(close, len)\nif ta.crossover(r, os)\n    strategy.entry("L", strategy.long)\nif ta.crossunder(r, ob)\n    strategy.entry("S", strategy.short)\nstrategy.exit("TrailL", "L", trail_points=tp, trail_offset=to, comment_trailing="Trail")\nstrategy.exit("TrailS", "S", trail_points=tp, trail_offset=to, comment_trailing="Trail")\n`],
+    rsi_trail: ['RSI Reversion + Trailing', `//@version=5\nstrategy("RSI Trailing", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=30)\nlen = input.int(14, "RSI Length")\nob = input.int(70, "Overbought")\nos = input.int(30, "Oversold")\ntrPts = input.int(300, "Trail activation (ticks)")\ntrOff = input.int(120, "Trail offset (ticks)")\nr = ta.rsi(close, len)\nif ta.crossover(r, os)\n    strategy.entry("L", strategy.long)\nif ta.crossunder(r, ob)\n    strategy.entry("S", strategy.short)\nstrategy.exit("TrailL", "L", trail_points=trPts, trail_offset=trOff, comment_trailing="Trail")\nstrategy.exit("TrailS", "S", trail_points=trPts, trail_offset=trOff, comment_trailing="Trail")\n`],
     supertrend_al: ['Supertrend + Alerts', `//@version=5\nindicator("Supertrend Pro", overlay=true)\nfactor = input.float(3.0, "Factor", step=0.1)\natrLen = input.int(10, "ATR Length")\n[st, dir] = ta.supertrend(factor, atrLen)\ncol = dir < 0 ? color.green : color.red\nplot(st, "Supertrend", color=col, linewidth=2)\nflipUp = dir < 0 and dir[1] > 0\nflipDn = dir > 0 and dir[1] < 0\nif flipUp\n    label.new(bar_index, low, "BUY", color=color.green, textcolor=color.white, yloc=yloc.belowbar)\n    alert("Supertrend BUY on " + syminfo.ticker, alert.freq_once_per_bar_close)\nif flipDn\n    label.new(bar_index, high, "SELL", color=color.red, textcolor=color.white, yloc=yloc.abovebar)\n    alert("Supertrend SELL on " + syminfo.ticker, alert.freq_once_per_bar_close)\n`],
     bb_fill: ['Bollinger Bands + Fill', `//@version=5\nindicator("Bollinger Fill", overlay=true)\nlen = input.int(20, "Length")\nmult = input.float(2.0, "StdDev", step=0.1)\n[mid, upper, lower] = ta.bb(close, len, mult)\npu = plot(upper, "Upper", color=color.blue)\npm = plot(mid, "Basis", color=color.orange)\npl = plot(lower, "Lower", color=color.blue)\nfill(pu, pl, color=color.new(color.blue, 88))\n`],
     macd_bar: ['MACD + Barcolor', `//@version=5\nindicator("MACD ColorBars", overlay=false)\n[m, sig, hist] = ta.macd(close, 12, 26, 9)\nhplot = plot(hist, "Hist", style=plot.style_columns, color=hist >= 0 ? color.green : color.red)\nplot(m, "MACD", color=color.blue)\nplot(sig, "Signal", color=color.orange)\nhline(0, "Zero", color=color.gray)\nbarcolor(hist >= 0 ? color.green : color.red)\n`],
@@ -2110,6 +2112,32 @@ if showLabels and ta.crossunder(close, ma)
       const p = panes[active];
       p.cfg.indicators.push({ uid: Date.now() + '' + Math.floor(Math.random() * 1000), type: 'mql', scriptId: mqlSel.id, name: $('#mqlName').value || mqlSel.name, params, meta: { inputs: mqlInfo.inputs }, visible: true });
       save(); p.refreshIndicators(true); mqlMsg('Добавлено на график: окно ' + (active + 1));
+    };
+    const renderRef = () => {
+      const q = ($('#mqlRefQ').value || '').trim().toLowerCase(), list = PMTCodeEd.PINE_REF || [];
+      let html = '';
+      for (const g of list) {
+        const items = g.items.filter((it) => !q || g.cat.toLowerCase().includes(q) || it.sig.toLowerCase().includes(q) || it.desc.toLowerCase().includes(q));
+        if (!items.length) continue;
+        html += `<div class="ref-cat">${esc(g.cat)}</div>` + items.map((it) =>
+          `<div class="ref-item" data-ins="${esc(it.ins)}"><code>${esc(it.sig)}</code><span>${esc(it.desc)}</span></div>`
+        ).join('');
+      }
+      $('#mqlRefList').innerHTML = html || '<div style="padding:10px;color:var(--mut)">Ничего не найдено</div>';
+    };
+    $('#mqlRefBtn').onclick = () => {
+      const open = $('#mqlRef').classList.toggle('hidden') === false;
+      $('#mqlRefBtn').classList.toggle('on', open);
+      if (open) { renderRef(); $('#mqlRefQ').focus(); }
+    };
+    $('#mqlRefQ').oninput = renderRef;
+    $('#mqlRefList').onclick = (e) => {
+      const row = e.target.closest('.ref-item'); if (!row) return;
+      if (!mqlSel || !mqlSel.supported || $('#mqlEd').classList.contains('hidden')) {
+        PMTUx.toast('Откройте скрипт для вставки', 'info');
+        return;
+      }
+      codeEd.insertSnippet(row.dataset.ins);
     };
   }
 

@@ -285,7 +285,9 @@
     const mi = (a, label, key = '') => `<div class="mi" data-a="${a}"><span>${label}</span>${key ? `<small>${key}</small>` : ''}</div>`;
     const m = document.createElement('div');
     m.className = 'ctxmenu';
-    m.innerHTML = mi('clone', 'Клонировать', 'Ctrl+D')
+    m.innerHTML = mi('props', 'Свойства…', '2× клик')
+      + '<div class="msep"></div>'
+      + mi('clone', 'Клонировать', 'Ctrl+D')
       + mi('lock', st.locked ? 'Разблокировать' : 'Заблокировать')
       + mi('hide', st.hidden ? 'Показать' : 'Скрыть')
       + '<div class="msep"></div>'

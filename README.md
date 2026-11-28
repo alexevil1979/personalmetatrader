@@ -1,57 +1,68 @@
 # PersonalMetaTrader
 
-Personal MetaTrader-style web terminal for technical analysis of Bybit markets.
-Stack: PHP 8.3+, MySQL 8, Apache 2.4, Redis, vanilla JS + TradingView Lightweight Charts, Bybit API V5.
+Web-терминал технического анализа и алгоритмической торговли для рынков Bybit в стиле TradingView.  
+Стек: PHP 8.3+, MySQL 8, Apache 2.4, Node.js (sandbox MQL/Pine), vanilla JS + TradingView Lightweight Charts v5, Bybit API V5.
 
-Live: https://pmt.1tlt.ru (also :18088 on the LAN).
+Production: `https://pmt.1tlt.ru`
 
-Status: **Stages 1-6 + auth/DB + Pine Script done** (infra; terminal UI, Bybit REST + WebSocket, candle cache; 33 indicators; 14 drawing tools). See [docs/AUDIT.md](docs/AUDIT.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## Основные возможности
 
-## Install
+### Графики и UX (TradingView Parity)
+- **Мультиоконные макеты (`1`, `2v`, `2h`, `3`, `4`, `6`)** с перетаскиваемыми сплиттерами, режимом максимизации одного графика (`Alt+Enter`) и полноэкранным режимом.
+- **Гранулярная синхронизация** между окнами: перекрестие, таймфрейм, символ и видимый диапазон времени; облачное хранение макетов (`/api/layouts`) и экспорт/импорт конфигурации в JSON.
+- **Типы графиков:** свечи, полые свечи, бары, линия, область, Baseline, Heikin Ashi; быстрый ввод таймфрейма цифрами (`1`, `5`, `60`, `1d`...), поиск тикеров (`Ctrl+K`, `/` или набор букв), переход к дате (`Alt+G`), измерение линейкой (`Shift+Drag` / `Alt+M`), экспорт PNG-скриншота (`Alt+S`), справка по горячим клавишам (`?`).
+- **Нижняя панель шкалы:** быстрые диапазоны (`1Д`, `5Д`, `1М`, `3М`, `6М`, `1Г`, `Всё`), живые часы, переключатели `%`, `log`, `auto`, водяной знак, настраиваемая палитра графика и отсчёт до закрытия бара, выровненный под ценой закрытия.
+- **Интерактивная легенда** OHLC + значения всех индикаторов с кнопками скрыть/настроить/удалить; кнопка `+` на перекрестии для мгновенного создания алерта или лимитного ордера на уровне цены.
+
+### Индикаторы и Технический рейтинг (`42` встроенных индикатора)
+- Библиотека [indicators.js](public/assets/indicators.js) + [pine_overlay.js](public/assets/pine_overlay.js):
+  - **Трендовые:** SMA, EMA, WMA, DEMA, TEMA, HMA, VWMA, Ichimoku Cloud (с облаком), Parabolic SAR, Supertrend, Linear Regression Channel (`linreg`).
+  - **Осцилляторы:** RSI, MACD, Stochastic, Stochastic RSI, CCI, Williams %R, Momentum, ROC, ADX/DMI, MFI, Awesome Oscillator, TRIX, Ultimate Oscillator.
+  - **Волатильность и объём:** Bollinger Bands, Keltner Channel, Donchian Channel, ATR, Volume Profile (гистограмма POC/VAH/VAL в области графика), OBV, CMF, VWAP, anchored/rolling уровни.
+  - **Smart Money / Структура:** Пивоты, Auto-Fibonacci, Support/Resistance, Market Structure, торговые сессии (Asia/London/NY), Fair Value Gaps (`fvg`), BOS/CHoCH (`smc`).
+- Каталог индикаторов с поиском, избранным ★ и шаблонами графиков; отдельная вкладка **Теханализ (TA Gauge)** с расчётом 20 сигналов (8 осцилляторов + 12 скользящих средних).
+
+### Инструменты рисования (`29` типов)
+- Модуль [drawings.js](public/assets/drawings.js): линии (тренд, луч, расширенная, инфо-линия, горизонт/луч/вертикаль), канал, инструменты Фибоначчи (коррекция, расширение, веер, временные зоны), вилы Эндрюса, фигуры (прямоугольник, эллипс, карандаш, стрелка), аннотации (текст, выноска, ценовая метка), Long/Short Position R:R, диапазоны цены/дат, Anchored VWAP и сервисная линия сделок/алертов (`tradeline`, `alertline`).
+- Магнит (слабый/сильный), Undo/Redo (`Ctrl+Z`/`Ctrl+Y`), клонирование (`Ctrl+D`), панель **Дерево объектов** (Z-порядок, блокировка, видимость), модальное окно точных координат и стиля (`2× клик`), плавающая панель избранных инструментов.
+
+### Алерты и мониторинг (`pmt-monitor`)
+- Серверные ценовые алерты с условиями пересечения (`cross_up`, `cross_down`, `above`, `below`), фоновым воркером [bin/monitor.php](bin/monitor.php), SSRF-безопасными webhook-уведомлениями ([Alerts.php](src/Core/Alerts.php)), звуковым сигналом в браузере и перетаскиваемыми линиями алертов прямо на графике.
+
+### Pine Script v5 & MQL4/MQL5 IDE
+- Редактор [code_editor.js](public/assets/code_editor.js) в нижней панели с подсветкой синтаксиса, автодополнением (`Ctrl+Space`), **6 готовыми шаблонами Pine v5**, встроенным **справочником функций (`📖 Справка`)**, Diff версий, логами и консолью (`log.*`, `alert`).
+- Изолированная Node-песочница (`pmt-mql` на `127.0.0.1:18090`, отдельный OS user без сети): рендеринг `plot`, `plotshape`, `hline`, `fill`, `bgcolor`, `barcolor`, `label`/`line`/`box`/`table`, `request.security`. Подробнее: [docs/PINE.md](docs/PINE.md) и [docs/MQL.md](docs/MQL.md).
+
+### Тестер стратегий (Strategy Tester Pro)
+- Брокер-эмулятор [pine/strategy.js](pine/strategy.js) + [src/Mql/Tester.php](src/Mql/Tester.php):
+  - Исполнение на next-open, внутрибарные Stop/Limit/Trailing Stop, комиссии и проскальзывание; метрики Net Profit, Profit Factor, Win Rate, Sharpe/Sortino, CAGR, MAE/MFE, разделение Long/Short.
+  - Переключение кривой доходности `$ / %` и сравнение с Buy & Hold, карта доходности по месяцам (Heatmap), сетка **оптимизации параметров** (до 36 комбинаций), экспорт сделок в CSV, переходы по сделкам на график. Подробнее: [docs/STRATEGY_TESTER.md](docs/STRATEGY_TESTER.md).
+
+### Рынок, Симулятор баров, Paper Trading и Bybit Read-Only
+- **Watchlist Pro:** мультилисты, цветовые флаги, сортировка, drag-and-drop, импорт/экспорт, живые тикеры по WebSocket.
+- **Стакан заявок (DOM) и Лента сделок** + **Скринер рынка Bybit и Тепловая карта (Heatmap)** в [market_panels.js](public/assets/market_panels.js).
+- **Симулятор баров (Bar Replay):** откат к любому бару, пошаговое проигрывание (`0.25x..4x`).
+- **Paper Trading & Read-Only Bybit портфель:** учёт ордеров/позиций в MySQL ([Paper.php](src/Core/Paper.php)), калькулятор объёма по `% риска`, перетаскиваемые SL/TP на графике, панель быстрой торговли в 1 клик, чтение балансов/позиций Bybit по ключам (шифрование `libsodium`, [ExchangeCreds.php](src/Core/ExchangeCreds.php)).
+
+## Установка и обновление
 ```bash
 git clone https://github.com/alexevil1979/personalmetatrader.git /ssd/www/personalmetatrader
 cd /ssd/www/personalmetatrader
-cp .env.example .env     # fill DB_PASS and APP_KEY
-php bin/migrate.php      # creates tables
+cp .env.example .env          # заполните DB_PASS и APP_KEY
+php bin/migrate.php           # применение схемы database/schema.sql
+sh deploy/install-mql.sh      # установка/обновление песочницы MQL/Pine
 ```
-Then install `deploy/pmt-apache.conf` (own vhost, port 18088) and a dedicated PHP 8.3-FPM pool (`deploy/pmt-fpm.conf`).
+Очистка устаревшего кэша свечей и старых логов алертов: `php bin/prune.php` (cron/timer).
 
-Health check: `curl http://HOST:18088/api/health`
-
-## Update
+## Проверка и тесты
 ```bash
-cd /ssd/www/personalmetatrader && git pull --ff-only && php bin/migrate.php
+# PHP синтаксис и smoke-тесты (API, Auth, Paper, Alerts, Tester, Crypto)
+php -d extension=sodium tests/php/smoke.php
+
+# Node.js наборы автотестов (все 9 сьютов)
+for f in tests/*.test.js; do node "$f" || exit 1; done
 ```
 
-## Security notes
-Secrets live only in `.env` (git-ignored). Prepared statements everywhere; API keys encrypted with libsodium.
-
-## Stage 2 notes
-- API: `/api/symbols`, `/api/tickers`, `/api/candles` (paged back via `end`), `/api/health`. Closed candles are cached in MySQL (dedup by PK); a per-IP rate limit is applied.
-- Live candles: the browser connects to Bybit public WebSocket, one shared connection per market category, with auto-reconnect and gap refill.
-- Known limits: no auth yet (stage 7 / user system), WS goes browser->Bybit directly (server-side gateway planned), no Redis extension for PHP 8.3 yet.
-
-## Stage 3 notes (indicators)
-- `public/assets/indicators.js`: one math library + registry of 33 indicators (trend, oscillators, volatility, volume, pivots, auto-Fibonacci, volume profile levels, market structure, S/R). Runs in browser and node: `node tests/indicators.test.js` (Wilder RSI reference, shape/NaN checks, look-ahead check).
-- Per-indicator params, colors, line width, visibility, own sub-pane for oscillators; settings and templates are stored in the browser (localStorage) until user accounts exist.
-- Recompute: full recalculation, throttled to 1/s on intra-candle ticks and immediate on a new candle (not a true incremental algorithm). Volume Profile is drawn as POC/VAH/VAL lines, not a histogram.
-
-## Stage 4 notes (drawing tools)
-- `public/assets/drawings.js`: 14 tools (H/V line, trend, ray, channel, rectangle, Fib retracement/extension/fan/time zones, pitchfork, text, arrow, price label). Objects are stored as time/price points (not pixels), drawn by a series primitive, so they stay put on zoom/scroll/timeframe change. Click-to-place with live preview, select, drag whole object or handles, color/width, Delete key, Esc to cancel, dbl-click to edit text. `node tests/drawings.test.js` checks the geometry.
-- Persistence is per symbol in browser localStorage (shared by all windows showing the symbol) until user accounts/MySQL (`chart_objects`) are wired in.
-
-## Auth & storage
-- Everything except `/api/health` and `/api/auth/*` requires a login. Sessions: PHP sessions (HttpOnly, SameSite=Lax, Secure on HTTPS, id regenerated on login); CSRF token in `X-CSRF-Token` for every non-GET request plus Origin check; argon2id passwords (min 10 chars); per-IP and per-email rate limits on auth.
-- Registration: the **first** registered user becomes admin, afterwards registration is closed unless `REGISTRATION=open` in `.env`. Admin CLI: `sudo -u pmt php bin/user.php create|reset-link|list|deactivate`.
-- Password reset: the VPS has no mail server, so the reset link is issued by an admin: `php bin/user.php reset-link EMAIL` -> open `/?reset=TOKEN` (valid 1 hour, token stored hashed).
-- Stored in MySQL per user: settings blob (`user_settings`: layout, panes, indicators, theme), templates (`chart_templates`), drawing objects (`chart_objects`), watchlists (`watchlists`/`watchlist_symbols`), auth events (`system_logs`). Browser localStorage stays as an offline cache and is wiped on logout. Existing local data is uploaded once on first login.
-- Not wired yet: `chart_layouts` (layouts live inside the settings blob), `indicator_instances`/`indicators` (instances live inside the settings blob), `exchange_credentials` UI.
-
-## Stage 5 notes (MQL)
-MQL4/MQL5 indicators are executed by an own compiler/runtime in a sandbox (separate OS user, no network, rlimits). EX4/EX5 are stored but not executed. See [docs/MQL.md](docs/MQL.md) for architecture, the honest list of supported functions, limits and tests (`node tests/mql.test.js`). Deploy/update the sandbox with `sh deploy/install-mql.sh`.
-
-## Pine Script
-TradingView Pine v5 indicators run in the same sandbox as MQL (upload `.pine` in the MQL dialog). Labels, lines, tables, plots, shapes and background colours are rendered on the chart; `request.security` fetches higher timeframes from Bybit. See [docs/PINE.md](docs/PINE.md) for the supported subset and limits; tests: `node tests/pine.test.js`.
-
-## Strategy Tester (stage 6)
-Pine `strategy()` scripts run through a broker emulator (next-open fills, OHLC-path stops/limits, commission, slippage) with metrics, equity/drawdown chart and stored history. See [docs/STRATEGY_TESTER.md](docs/STRATEGY_TESTER.md); tests: `node tests/pine_strategy.test.js`.
+## Безопасность
+- Секреты хранятся только в `.env` (в `.gitignore`); API-ключи Bybit шифруются `libsodium`.
+- Strict Content-Security-Policy (без inline-скриптов и inline-обработчиков), CSRF-токены + `Origin`-проверка, `argon2id` пароли, prepared statements.

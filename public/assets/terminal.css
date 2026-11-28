@@ -397,3 +397,11 @@ body.nolegend .pane .ohlc{display:none}
 .opt-tbl th:first-child,.opt-tbl td:first-child{text-align:left}
 .opt-tbl th{position:sticky;top:0;background:var(--panel);color:var(--mut)}
 .opt-tbl tbody tr{cursor:pointer}.opt-tbl tbody tr:hover{background:var(--bg)}
+#mqlRef{width:240px;flex:0 0 240px;border-left:1px solid var(--line);display:flex;flex-direction:column;gap:4px;padding-left:6px;min-height:0}
+#mqlRefQ{width:100%;font-size:11px;padding:3px 6px}
+#mqlRefList{flex:1;overflow:auto;font-size:11px}
+.ref-cat{position:sticky;top:0;background:var(--panel);color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.4px;padding:4px 4px;border-bottom:1px solid var(--line)}
+.ref-item{padding:4px 5px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;flex-direction:column;gap:2px}
+.ref-item:hover{background:var(--bg)}
+.ref-item code{font:600 10.5px/1.25 Consolas,monospace;color:var(--acc);word-break:break-word}
+.ref-item span{color:var(--mut);font-size:10px}

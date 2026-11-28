@@ -218,9 +218,10 @@
   }
 
   // ---------- TradingView Technical Analysis Rating Gauge ----------
-  function computeTaSummary(candles) {
-    if (!candles || candles.length < 25 || !window.PMTInd) return null;
-    const { M, REG, defaults } = window.PMTInd, n = candles.length, lastPx = candles[n - 1].close;
+  function computeTaSummary(candles, indLib) {
+    const Ind = indLib || (typeof window !== 'undefined' ? window.PMTInd : null);
+    if (!candles || candles.length < 25 || !Ind) return null;
+    const { M, REG, defaults } = Ind, n = candles.length, lastPx = candles[n - 1].close;
     const closes = candles.map((k) => k.close);
     const hl2 = candles.map((k) => (k.high + k.low) / 2);
     const osc = [], ma = [];
@@ -317,5 +318,6 @@
     <table class="ta-tbl"><tbody>${ta.ma.map(rowHtml).join('')}</tbody></table>`;
   }
 
-  window.PMTMarket = { wireDom, setDomVisible, syncDom, wireScreener, renderTaPanel };
+  if (typeof window !== 'undefined') window.PMTMarket = { wireDom, setDomVisible, syncDom, wireScreener, renderTaPanel, computeTaSummary };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { computeTaSummary };
 })();
