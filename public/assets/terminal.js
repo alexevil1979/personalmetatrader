@@ -282,6 +282,29 @@
         say('Ключи удалены', true);
       } catch (e) { say(e.message); }
     };
+    $('#btnImportCfg').onclick = () => $('#importCfgFile').click();
+    $('#btnExportCfg').onclick = () => {
+      const payload = { exportedAt: new Date().toISOString(), state: { ...state, panes: panes.map((p) => p.cfg) } };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = `pmt_workspace_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click(); URL.revokeObjectURL(a.href);
+      say('Конфигурация экспортирована', true);
+    };
+    $('#importCfgFile').onchange = async (e) => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      try {
+        const j = JSON.parse(await f.text());
+        const patch = j && j.state ? j.state : j;
+        if (!patch || typeof patch !== 'object') throw new Error('Неверный формат файла');
+        applyStatePatch(patch);
+        $('#theme').value = state.theme; document.body.classList.toggle('light', state.theme === 'light');
+        $('#tz').value = state.tz;
+        while (panes.length) panes.pop().destroy();
+        syncSyncUi(); ensureLayout(); syncChartInputs(); renderFavTools(); save();
+        say('Настройки импортированы', true);
+      } catch (err) { say('Ошибка импорта: ' + err.message); }
+    };
     $('#setClose').onclick = () => dlg.classList.add('hidden');
     dlg.onmousedown = (e) => { if (e.target === dlg) dlg.classList.add('hidden'); };
     document.querySelectorAll('#setDlg .seteye[data-for]').forEach((b) => {
@@ -733,14 +756,40 @@
     tfSec() { const t = TFS.find((x) => x[0] === this.cfg.tf); return !t ? 60 : t[0] === 'D' ? 86400 : t[0] === 'W' ? 604800 : t[0] === 'M' ? 2592000 : +t[0] * 60; }
     tickCountdown() {
       const last = this.candles[this.candles.length - 1];
-      let y = null;
-      if (last && this.main) { try { y = this.main.priceToCoordinate(last.close); } catch { /* not ready */ } }
+      let y = null, ph = this.cv.clientHeight - 28;
+      if (!this.replay && last && this.main) {
+        try { y = this.main.priceToCoordinate(last.close); ph = this.chart.paneSize().height || ph; } catch { /* not ready */ }
+      }
       const end = last ? (last.time + this.tfSec()) * 1000 - Date.now() : 0;
-      if (y === null || end <= 0) { this.cntEl.classList.add('hidden'); return; }
+      if (this.replay || y === null || y < 0 || y > ph || end <= 0) { this.cntEl.classList.add('hidden'); return; }
       const s = Math.floor(end / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
       this.cntEl.textContent = d > 0 ? d + 'д' : h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0') : m + ':' + String(ss).padStart(2, '0');
       this.cntEl.classList.remove('hidden');
-      this.cntEl.style.top = Math.round(y) + 'px';
+      let top = Math.round(y) + 10;
+      if (top + 16 > ph) top = Math.max(0, Math.round(y) - 26);
+      this.cntEl.style.top = top + 'px';
+      let rightVis = true, pw = 56;
+      try {
+        rightVis = this.chart.priceScale('right').options().visible !== false;
+        pw = this.chart.priceScale(rightVis ? 'right' : 'left').width() || pw;
+      } catch { /* fallback */ }
+      this.cntEl.style.right = rightVis ? '0px' : 'auto';
+      this.cntEl.style.left = rightVis ? 'auto' : '0px';
+      if (pw > 10) this.cntEl.style.width = (Math.round(pw) - 1) + 'px';
+      const t = chartTheme();
+      this.cntEl.style.background = last.close >= last.open ? t.up : t.dn;
+      this.cntEl.style.filter = 'brightness(0.84)';
+    }
+    async zoomDays(days) {
+      if (!this.candles.length) return;
+      if (days === 'all') { this.chart.timeScale().fitContent(); return; }
+      const to = this.candles[this.candles.length - 1].time, from = to - (+days) * 86400;
+      while (from < this.candles[0].time && !this.exhausted && this.candles.length < MAX_CANDLES) {
+        const prev = this.candles.length;
+        await this.loadOlder();
+        if (this.candles.length === prev) break;
+      }
+      this.chart.timeScale().setVisibleRange({ from: Math.max(this.candles[0].time, from), to });
     }
     volData(c) { const t = chartTheme(); return c.map((k) => ({ time: k.time, value: k.volume, color: (k.close >= k.open ? t.up : t.dn) + '66' })); }
     render() {
@@ -1115,7 +1164,18 @@
     document.querySelectorAll('#typeMenu .mi').forEach((m) => m.classList.toggle('on', m.dataset.type === c.type));
     loadSymbols(c.category).catch(() => {});
     renderWatch(); syncWatchWs(); renderObjTree(); updateInfo(); updateObjBar();
+    syncBottomScaleUi();
     PMTMarket.syncDom(c.category, c.symbol);
+  }
+  function syncBottomScaleUi() {
+    const p = panes[active];
+    if (!p || !p.chart) return;
+    try {
+      const ps = p.chart.priceScale('right').options(), LC = LightweightCharts;
+      $('#btnScalePct').classList.toggle('on', ps.mode === LC.PriceScaleMode.Percentage);
+      $('#btnScaleLog').classList.toggle('on', ps.mode === LC.PriceScaleMode.Logarithmic);
+      $('#btnScaleAuto').classList.toggle('on', !!ps.autoScale);
+    } catch { /* ignore */ }
   }
 
   function applyToPanes(patch) {
@@ -1929,6 +1989,11 @@ if showLabels and ta.crossunder(close, ma)
     if (!d.ok) { $('#tInputs').innerHTML = `<div class="dn">Ошибка: ${esc(d.error)}${d.line ? ` (строка ${d.line})` : ''}</div>`; return; }
     if (!d.info.isStrategy) { $('#tInputs').innerHTML = '<div class="dn">Это индикатор: в скрипте нет strategy(...). Тестер работает со стратегиями.</div>'; return; }
     $('#tInputs').innerHTML = d.info.inputs.map((q) => renderMqlInput(q, q.default, `data-ti="${esc(q.name)}"`)).join('') || '';
+    const numInputs = d.info.inputs.filter((q) => q.kind === 'int' || q.kind === 'float');
+    const optsHtml = numInputs.map((q) => `<option value="${esc(q.name)}">${esc(q.title || q.name)}</option>`).join('');
+    $('#tOptP1').innerHTML = optsHtml || '<option value="">нет числовых</option>';
+    $('#tOptP2').innerHTML = '<option value="">— нет —</option>' + optsHtml;
+    if (numInputs[0]) { const v = +numInputs[0].default || 10; $('#tOptMin1').value = Math.max(1, Math.round(v * 0.5)); $('#tOptMax1').value = Math.round(v * 2); $('#tOptStep1').value = numInputs[0].kind === 'float' ? +(v * 0.25).toFixed(2) : Math.max(1, Math.round(v * 0.25)); }
   }
   function renderTesterPerf(r) {
     const m = r.metrics, l = m.long || m, s = m.short || m;
@@ -2066,7 +2131,42 @@ if showLabels and ta.crossunder(close, ma)
       $('#tPanPerf').classList.toggle('hidden', tTab !== 'perf');
       $('#tPanTrades').classList.toggle('hidden', tTab !== 'trades');
       $('#tPanProps').classList.toggle('hidden', tTab !== 'props');
+      $('#tPanOpt').classList.toggle('hidden', tTab !== 'opt');
       if (tTab === 'over' && tChart) tChart.timeScale().fitContent();
+    };
+    let optRows = [];
+    $('#tOptRun').onclick = async () => {
+      const id = +$('#tScript').value, p1 = $('#tOptP1').value, p2 = $('#tOptP2').value;
+      if (!id || !p1) { tMsg('Выберите стратегию и параметр оптимизации', true); return; }
+      const grid = [{ name: p1, min: parseFloat($('#tOptMin1').value), max: parseFloat($('#tOptMax1').value), step: parseFloat($('#tOptStep1').value) }];
+      if (p2 && p2 !== p1) grid.push({ name: p2, min: parseFloat($('#tOptMin2').value), max: parseFloat($('#tOptMax2').value), step: parseFloat($('#tOptStep2').value) });
+      const inputs = {}; document.querySelectorAll('#tInputs [data-ti]').forEach((i) => { inputs[i.dataset.ti] = i.dataset.k === 'bool' ? i.checked : i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
+      const to = Math.floor(Date.now() / 1000), body = { id, category: $('#tCat').value, symbol: $('#tSym').value.trim().toUpperCase(), tf: $('#tTf').value, from: to - (+$('#tPeriod').value) * 86400, to, inputs, grid, metric: $('#tOptMetric').value };
+      const num = (sel, key) => { const v = $(sel).value.trim(); if (v !== '') body[key] = parseFloat(v); };
+      num('#tCap', 'initial_capital'); num('#tComm', 'commission_value'); num('#tSlip', 'slippage_ticks'); if ($('#tComm').value.trim() !== '') body.commission_type = 'percent';
+      $('#tOptRun').disabled = true; $('#tOptOut').innerHTML = '<div style="padding:12px;color:var(--mut)">Оптимизация сетки параметров…</div>';
+      try {
+        const res = await call('POST', 'tester/optimize', null, body);
+        if (!res.ok) { tMsg(res.error || 'Ошибка оптимизации', true); }
+        else {
+          optRows = res.results || [];
+          tMsg(`Проверено комбинаций: ${res.tested} · ${res.bars} баров · ${(res.ms / 1000).toFixed(1)} с`);
+          $('#tOptOut').innerHTML = optRows.length ? `<table class="opt-tbl"><thead><tr><th>Параметры</th><th>Net Profit</th><th>Profit %</th><th>Сделок</th><th>Win Rate</th><th>PF</th><th>Sharpe</th><th>Макс. DD</th></tr></thead><tbody>${
+            optRows.map((row, idx) => `<tr data-oidx="${idx}"><td><b>${esc(Object.entries(row.params).map(([k, v]) => `${k}=${v}`).join(', '))}</b></td><td class="${row.netProfit >= 0 ? 'up' : 'dn'}">${nf(row.netProfit)}</td><td class="${row.netProfitPct >= 0 ? 'up' : 'dn'}">${nf(row.netProfitPct)}%</td><td>${row.trades}</td><td>${nf(row.winRate, 1)}%</td><td>${row.profitFactor === null ? '∞' : nf(row.profitFactor, 2)}</td><td>${row.sharpe === null ? '—' : nf(row.sharpe, 2)}</td><td class="dn">${nf(row.maxDrawdownPct)}%</td></tr>`).join('')
+          }</tbody></table>` : '<div style="padding:12px;color:var(--mut)">Нет успешных прогонов</div>';
+        }
+      } catch (e) { tMsg(e.message, true); $('#tOptOut').innerHTML = `<div class="dn" style="padding:12px">${esc(e.message)}</div>`; }
+      $('#tOptRun').disabled = false;
+    };
+    $('#tOptOut').onclick = (e) => {
+      const tr = e.target.closest('tr[data-oidx]'); if (!tr) return;
+      const row = optRows[+tr.dataset.oidx]; if (!row) return;
+      for (const [k, v] of Object.entries(row.params)) {
+        const el = document.querySelector(`#tInputs [data-ti="${k}"]`);
+        if (el) el.value = String(v);
+      }
+      $('#testTabs [data-tt="over"]').click();
+      $('#tRun').click();
     };
     $('#tPctMode').onclick = () => {
       tPctMode = !tPctMode;
@@ -2540,6 +2640,33 @@ if showLabels and ta.crossunder(close, ma)
     $('#togLegend').onclick = () => { state.showLegend = !state.showLegend; save(); legTog(); };
     legTog();
     $('#watchClose').onclick = () => $('#togWatch').onclick();
+    $('#tvZooms').onclick = (e) => {
+      const b = e.target.closest('[data-zd]');
+      if (b && panes[active]) panes[active].zoomDays(b.dataset.zd);
+    };
+    $('#btnScalePct').onclick = () => {
+      const p = panes[active]; if (!p) return;
+      const ps = p.chart.priceScale('right'), LC = LightweightCharts;
+      ps.applyOptions({ mode: ps.options().mode === LC.PriceScaleMode.Percentage ? LC.PriceScaleMode.Normal : LC.PriceScaleMode.Percentage });
+      syncBottomScaleUi();
+    };
+    $('#btnScaleLog').onclick = () => {
+      const p = panes[active]; if (!p) return;
+      const ps = p.chart.priceScale('right'), LC = LightweightCharts;
+      ps.applyOptions({ mode: ps.options().mode === LC.PriceScaleMode.Logarithmic ? LC.PriceScaleMode.Normal : LC.PriceScaleMode.Logarithmic });
+      syncBottomScaleUi();
+    };
+    $('#btnScaleAuto').onclick = () => {
+      const p = panes[active]; if (!p) return;
+      const ps = p.chart.priceScale('right');
+      ps.applyOptions({ autoScale: !ps.options().autoScale });
+      syncBottomScaleUi();
+    };
+    const updateClock = () => {
+      const el = $('#tvClock');
+      if (el) el.textContent = fmtTime(Math.floor(Date.now() / 1000), { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + (state.tz === 'UTC' ? ' UTC' : '');
+    };
+    updateClock();
 
     const first = state.panes[0] || { category: state.category, symbol: 'BTCUSDT', tf: '60', type: 'candles' };
     $('#category').value = first.category;
@@ -2548,7 +2675,7 @@ if showLabels and ta.crossunder(close, ma)
       ensureLayout(); refreshAlerts(true); pollTickers();
       setInterval(pollTickers, 15000);
       setInterval(pollAlertLogs, 12000);
-      setInterval(() => panes.forEach((p) => p.tickCountdown()), 1000);
+      setInterval(() => { panes.forEach((p) => p.tickCountdown()); updateClock(); }, 1000);
       window.addEventListener('beforeunload', save);
     });
   }

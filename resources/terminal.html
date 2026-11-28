@@ -263,6 +263,23 @@
 
 <footer id="info">
   <div id="infoGrid"></div>
+  <div class="tv-strip">
+    <div id="tvZooms" class="tv-strip-l">
+      <button type="button" data-zd="1">1Д</button>
+      <button type="button" data-zd="5">5Д</button>
+      <button type="button" data-zd="30">1М</button>
+      <button type="button" data-zd="90">3М</button>
+      <button type="button" data-zd="180">6М</button>
+      <button type="button" data-zd="365">1Г</button>
+      <button type="button" data-zd="all">Всё</button>
+    </div>
+    <div class="tv-strip-r">
+      <span id="tvClock"></span>
+      <button id="btnScalePct" type="button" title="Процентная шкала">%</button>
+      <button id="btnScaleLog" type="button" title="Логарифмическая шкала">log</button>
+      <button id="btnScaleAuto" type="button" title="Авто-масштаб цены">auto</button>
+    </div>
+  </div>
 </footer>
 
 <div id="objBar" class="hidden">
@@ -337,6 +354,7 @@
           <button data-tt="perf">Сводка</button>
           <button data-tt="trades">Список сделок</button>
           <button data-tt="props">Свойства</button>
+          <button data-tt="opt">Оптимизация</button>
         </div>
         <span class="grow"></span>
         <button id="tPctMode" title="Переключить шкалу кривой: $ или %">$ / %</button>
@@ -346,6 +364,21 @@
       <div id="tPanPerf" class="tpan hidden"><div id="tPerfTable"></div></div>
       <div id="tPanTrades" class="tpan hidden"><div id="tTrades"></div></div>
       <div id="tPanProps" class="tpan hidden"><div id="tProps"></div></div>
+      <div id="tPanOpt" class="tpan hidden">
+        <div class="opt-bar">
+          <label>Параметр 1 <select id="tOptP1"></select></label>
+          <label>Мин <input id="tOptMin1" type="number" step="any" value="5"></label>
+          <label>Макс <input id="tOptMax1" type="number" step="any" value="25"></label>
+          <label>Шаг <input id="tOptStep1" type="number" step="any" value="5"></label>
+          <label>Параметр 2 <select id="tOptP2"><option value="">— нет —</option></select></label>
+          <label>Мин <input id="tOptMin2" type="number" step="any" value="10"></label>
+          <label>Макс <input id="tOptMax2" type="number" step="any" value="30"></label>
+          <label>Шаг <input id="tOptStep2" type="number" step="any" value="10"></label>
+          <label>Метрика <select id="tOptMetric"><option value="netProfit">Net Profit</option><option value="profitFactor">Profit Factor</option><option value="sharpe">Sharpe</option><option value="winRate">Win Rate</option><option value="maxDrawdownPct">Min Drawdown</option></select></label>
+          <button id="tOptRun" class="btnpri" type="button">Оптимизировать</button>
+        </div>
+        <div id="tOptOut" style="flex:1;overflow:auto"><div style="padding:12px;color:var(--mut)">Выберите 1–2 числовых параметра и нажмите «Оптимизировать» (до 36 комбинаций за прогон). Клик по строке применит параметры.</div></div>
+      </div>
     </div>
   </div>
 </div></div>
@@ -374,6 +407,12 @@
     <label class="setlab" for="setPass2">Повторите пароль</label>
     <div class="setpass"><input id="setPass2" type="password" placeholder="Ещё раз" autocomplete="new-password"><button class="seteye" data-for="#setPass2" title="Показать/скрыть">👁</button></div>
     <div class="setbtns"><button id="setPassGo" class="btnpri">Сменить пароль</button></div>
+    <div class="setsec" style="margin-top:8px">Резервная копия настроек</div>
+    <div class="setbtns">
+      <button id="btnExportCfg" class="btnsec" type="button">Экспорт JSON</button>
+      <button id="btnImportCfg" class="btnsec" type="button">Импорт JSON</button>
+      <input id="importCfgFile" type="file" accept=".json" class="hidden">
+    </div>
   </div>
   <div id="setPanNotify" class="setpan hidden">
     <div class="setnote">При пробое ценовых уровней («⇕ Уровни» на графике) придёт сообщение в Telegram. Токен возьмите у @BotFather. Чтобы узнать ID чата, напишите вашему боту любое сообщение и нажмите «Проверить». Если api.telegram.org недоступен с сервера — укажите прокси (http, https, socks4, socks5).</div>

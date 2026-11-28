@@ -239,6 +239,12 @@ final class Api
                         return;
                     }
                     self::out(Tester::run($uid, self::body(30000)));
+                } elseif ($path === '/api/tester/optimize' && $method === 'POST') {
+                    if (!Cache::rateLimit('tester_opt:' . $uid, 10)) {
+                        self::out(['error' => 'rate limit'], 429);
+                        return;
+                    }
+                    self::out(Tester::optimize($uid, self::body(30000)));
                 } elseif ($path === '/api/tester/history' && $method === 'GET') {
                     self::out(['tests' => Tester::history($uid)]);
                 } elseif (preg_match('#^/api/tester/(\d+)$#', $path, $m)) {

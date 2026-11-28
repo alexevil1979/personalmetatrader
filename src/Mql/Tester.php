@@ -14,7 +14,7 @@ final class Tester
     private const PERIOD_MIN = ['1' => 1, '3' => 3, '5' => 5, '15' => 15, '30' => 30, '60' => 60, '120' => 120, '240' => 240, '360' => 360, '720' => 720, 'D' => 1440, 'W' => 10080, 'M' => 43200];
     private const MAX_BARS = 20000;
 
-    public static function run(int $uid, array $b): array
+    private static function prepareRun(int $uid, array $b): array
     {
         $scriptId = (int) ($b['id'] ?? 0);
         $row = Scripts::row($uid, $scriptId);
@@ -52,12 +52,11 @@ final class Tester
         $source = Scripts::source($uid, $scriptId, 'pine', (int) $row['current_version']);
         $d = Scripts::exec(['mode' => 'describe', 'lang' => 'pine', 'source' => $source]);
         if (!($d['ok'] ?? false)) {
-            return $d;
+            return ['err' => $d];
         }
         if (!($d['info']['isStrategy'] ?? false)) {
             throw new InvalidArgumentException('Скрипт не является стратегией: нет вызова strategy(...)');
         }
-        // warm-up bars before the period so indicators are ready at its start
         $mainSec = self::PERIOD_MIN[$tf] * 60;
         $candles = Market::candlesRange($cat, $sym, $tf, $from - 300 * $mainSec, $to, self::MAX_BARS);
         if (count($candles) < 30) {
@@ -70,14 +69,23 @@ final class Tester
                 continue;
             }
             if (!isset(self::PERIOD_MIN[$stf]) || self::PERIOD_MIN[$stf] * 60 < $mainSec) {
-                return ['ok' => false, 'error' => 'request.security: таймфрейм "' . $stf . '" не поддерживается (ниже графика или неизвестен)', 'kind' => 'mql'];
+                return ['err' => ['ok' => false, 'error' => 'request.security: таймфрейм "' . $stf . '" не поддерживается (ниже графика или неизвестен)', 'kind' => 'mql']];
             }
             $extra[$stf] = Market::candlesRange($cat, $sym, $stf, $from - 300 * $mainSec - self::PERIOD_MIN[$stf] * 120, $to, 4000);
         }
         $info = Db::pdo()->prepare('SELECT price_scale, tick_size FROM trading_symbols WHERE exchange_id=1 AND category=? AND symbol=?');
         $info->execute([$cat, $sym]);
         $si = $info->fetch() ?: ['price_scale' => 2, 'tick_size' => 0.01];
+        return compact('scriptId', 'row', 'cat', 'sym', 'tf', 'from', 'to', 'inputs', 'tester', 'source', 'candles', 'extra', 'si');
+    }
 
+    public static function run(int $uid, array $b): array
+    {
+        $ctx = self::prepareRun($uid, $b);
+        if (isset($ctx['err'])) {
+            return $ctx['err'];
+        }
+        extract($ctx);
         $t0 = microtime(true);
         $res = Scripts::exec([
             'mode' => 'run', 'lang' => 'pine', 'source' => $source, 'candles' => $candles, 'inputs' => (object) $inputs, 'extra' => (object) $extra,
@@ -93,6 +101,91 @@ final class Tester
         $out['ms'] = $ms;
         $out['bars'] = count($candles);
         return $out;
+    }
+
+    public static function optimize(int $uid, array $b): array
+    {
+        $grid = is_array($b['grid'] ?? null) ? $b['grid'] : [];
+        if (!$grid || count($grid) > 2) {
+            throw new InvalidArgumentException('Укажите 1 или 2 параметра для оптимизации');
+        }
+        $axes = [];
+        $total = 1;
+        foreach ($grid as $g) {
+            $nm = trim((string) ($g['name'] ?? ''));
+            $mn = (float) ($g['min'] ?? 0);
+            $mx = (float) ($g['max'] ?? 0);
+            $st = (float) ($g['step'] ?? 1);
+            if (!preg_match('/^\w{1,64}$/', $nm) || $st <= 0 || $mx < $mn) {
+                throw new InvalidArgumentException('Неверный диапазон оптимизации для ' . $nm);
+            }
+            $vals = [];
+            for ($v = $mn; $v <= $mx + $st * 1e-6; $v += $st) {
+                $vals[] = round($v, 6);
+                if (count($vals) > 36) {
+                    break;
+                }
+            }
+            $axes[] = ['name' => $nm, 'vals' => $vals];
+            $total *= count($vals);
+        }
+        if ($total < 2 || $total > 36) {
+            throw new InvalidArgumentException("Количество комбинаций: {$total} (допустимо от 2 до 36)");
+        }
+        $metric = (string) ($b['metric'] ?? 'netProfit');
+        if (!in_array($metric, ['netProfit', 'profitFactor', 'sharpe', 'winRate', 'maxDrawdownPct'], true)) {
+            $metric = 'netProfit';
+        }
+
+        $ctx = self::prepareRun($uid, $b);
+        if (isset($ctx['err'])) {
+            return $ctx['err'];
+        }
+        extract($ctx);
+
+        $combos = [[]];
+        foreach ($axes as $ax) {
+            $next = [];
+            foreach ($combos as $c) {
+                foreach ($ax['vals'] as $v) {
+                    $c2 = $c;
+                    $c2[$ax['name']] = $v;
+                    $next[] = $c2;
+                }
+            }
+            $combos = $next;
+        }
+
+        $t0 = microtime(true);
+        $rows = [];
+        foreach ($combos as $ov) {
+            $runInputs = array_merge($inputs, $ov);
+            $res = Scripts::exec([
+                'mode' => 'run', 'lang' => 'pine', 'source' => $source, 'candles' => $candles, 'inputs' => (object) $runInputs, 'extra' => (object) $extra,
+                'symbol' => $sym, 'periodMin' => self::PERIOD_MIN[$tf], 'digits' => (int) $si['price_scale'], 'point' => (float) $si['tick_size'], 'tester' => (object) $tester,
+            ], 25);
+            if (!($res['ok'] ?? false) || !isset($res['strategy'])) {
+                continue;
+            }
+            $m = $res['strategy']['metrics'];
+            $rows[] = [
+                'params' => $ov,
+                'netProfit' => (float) ($m['netProfit'] ?? 0),
+                'netProfitPct' => (float) ($m['netProfitPct'] ?? 0),
+                'trades' => (int) ($m['trades'] ?? 0),
+                'winRate' => (float) ($m['winRate'] ?? 0),
+                'profitFactor' => $m['profitFactor'] === null ? null : (float) $m['profitFactor'],
+                'maxDrawdownPct' => (float) ($m['maxDrawdownPct'] ?? 0),
+                'sharpe' => $m['sharpe'] === null ? null : (float) $m['sharpe'],
+                'finalEquity' => (float) ($m['finalEquity'] ?? 0),
+            ];
+        }
+        usort($rows, static function (array $a, array $b) use ($metric): int {
+            $va = $a[$metric] ?? ($metric === 'maxDrawdownPct' ? 1e9 : -1e9);
+            $vb = $b[$metric] ?? ($metric === 'maxDrawdownPct' ? 1e9 : -1e9);
+            return $metric === 'maxDrawdownPct' ? ($va <=> $vb) : ($vb <=> $va);
+        });
+        return ['ok' => true, 'tested' => count($rows), 'bars' => count($candles), 'ms' => (int) ((microtime(true) - $t0) * 1000), 'metric' => $metric, 'results' => $rows];
     }
 
     /** Keep only the tested period (warm-up bars are dropped) and downsample the equity + buy&hold curve. */
