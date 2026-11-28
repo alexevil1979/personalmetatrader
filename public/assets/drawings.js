@@ -410,8 +410,9 @@
           if (t.pill) {
             ctx.font = 'bold 11px sans-serif';
             const tw = ctx.measureText(t.s).width + 12, bh = 18;
+            const bx = t.align === 'right' ? t.x - tw + 6 : t.align === 'left' ? t.x - 6 : t.x - tw / 2;
             ctx.fillStyle = tc;
-            ctx.beginPath(); ctx.roundRect ? ctx.roundRect(t.x - tw / 2, t.y - bh + 4, tw, bh, 4) : ctx.rect(t.x - tw / 2, t.y - bh + 4, tw, bh); ctx.fill();
+            ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, t.y - bh + 4, tw, bh, 4) : ctx.rect(bx, t.y - bh + 4, tw, bh); ctx.fill();
             ctx.fillStyle = '#fff'; ctx.fillText(t.s, t.x, t.y); ctx.font = '11px sans-serif'; continue;
           }
           ctx.fillStyle = tc;
@@ -519,11 +520,16 @@
       if (this.drag) { if (this.drag.moved) { if (this.drag.o.id < 0) { if (this.hooks.onServiceChange) this.hooks.onServiceChange(this, this.drag.o); } else persist(this.key); } this.drag = null; }
     }
     dbl(e) {
-      if (!this.inside(e)) return; const h = this.hit(e);
-      if (h && h.o.id >= 0 && !(h.o.style && h.o.style.locked) && ['text', 'callout', 'hline', 'hray', 'trend', 'rect'].includes(h.o.type)) {
+      if (!this.inside(e) || this.hooks.tool() !== 'cursor') return;
+      const h = this.hit(e);
+      if (h && h.o.id >= 0) {
         e.stopPropagation();
-        const s = prompt('Текст / подпись', h.o.style.text || '');
-        if (s !== null) { this.snapshot(); h.o.style.text = s; persist(this.key); this.request(); }
+        this.sel = h.o.id; this.hooks.onSel(this); this.request();
+        if (this.hooks.onDblClick) { this.hooks.onDblClick(this, h.o); return; }
+        if (!(h.o.style && h.o.style.locked) && ['text', 'callout', 'hline', 'hray', 'trend', 'rect'].includes(h.o.type)) {
+          const s = prompt('Текст / подпись', h.o.style.text || '');
+          if (s !== null) { this.snapshot(); h.o.style.text = s; persist(this.key); this.request(); }
+        }
       }
     }
     cancel() { if (this.creating) { this.creating = null; this.hooks.toolDone(); this.request(); } else if (this.sel !== null) { this.sel = null; this.hooks.onSel(this); this.request(); } }

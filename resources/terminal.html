@@ -64,6 +64,7 @@
   <div class="sep"></div>
   <button id="btnRuler" title="Линейка измерения (Alt+M или Shift+перетаскивание)">📏</button>
   <button id="btnShot" title="Скриншот графика (Alt+S)">📷</button>
+  <button id="btnFull" title="Полный экран">⛶</button>
   <select id="tz" title="Часовой пояс"><option value="UTC">UTC</option><option value="local">Локальное</option></select>
   <select id="theme" title="Тема"><option value="dark">Тёмная</option><option value="light">Светлая</option></select>
   <span class="grow"></span>
@@ -92,6 +93,7 @@
         <button id="tabObj">Объекты</button>
         <button id="tabAlerts">Алерты</button>
         <button id="tabDom">Стакан</button>
+        <button id="tabTa">ТА</button>
       </div>
       <button id="watchClose" title="Скрыть панель (кнопка «Обзор» в шапке вернёт её)">✕</button>
     </div>
@@ -130,6 +132,9 @@
       <div id="domBook"></div>
       <div class="ot-sec">Лента сделок (Trades)</div>
       <div id="domTrades"></div>
+    </div>
+    <div id="taPan" class="hidden">
+      <div id="taBody"></div>
     </div>
   </aside>
   <div id="workCol">
@@ -288,10 +293,34 @@
   <input type="number" id="objWidth" min="1" max="6" title="Толщина">
   <select id="objDash" title="Стиль линии"><option value="solid">───</option><option value="dashed">- - -</option><option value="dotted">····</option></select>
   <input type="range" id="objAlpha" min="0" max="60" step="5" title="Прозрачность заливки">
+  <button id="objProps" title="Свойства и координаты объекта (2× клик)">⚙</button>
   <button id="objLock" title="Заблокировать/разблокировать">🔓</button>
   <button id="objClone" title="Клонировать (Ctrl+D)">⧉</button>
   <button id="objDel" title="Удалить (Del)">🗑</button>
 </div>
+
+<div id="drawPropsDlg" class="dlg hidden"><div class="dlgbox setbox" style="width:min(400px,94vw)">
+  <div class="sethead"><div class="settitle" id="dpTitle">Свойства объекта</div><button id="dpClose" class="setx">✕</button></div>
+  <div class="setpan" style="padding-bottom:14px">
+    <div class="al-grid2">
+      <label class="setlab">Цвет <input type="color" id="dpColor"></label>
+      <label class="setlab">Толщина <input type="number" id="dpWidth" min="1" max="6"></label>
+    </div>
+    <div class="al-grid2">
+      <label class="setlab">Линия <select id="dpDash"><option value="solid">Сплошная</option><option value="dashed">Пунктир</option><option value="dotted">Точки</option></select></label>
+      <label class="setlab">Заливка (%) <input type="number" id="dpAlpha" min="0" max="60" step="5"></label>
+    </div>
+    <label class="setlab">Текст / подпись <input id="dpText" placeholder="необязательно"></label>
+    <div class="dlgrow" style="margin:0">
+      <label class="chk"><input type="checkbox" id="dpExtL"> Продлить влево</label>
+      <label class="chk"><input type="checkbox" id="dpExtR"> Продлить вправо</label>
+      <label class="chk"><input type="checkbox" id="dpLock"> Блок</label>
+    </div>
+    <div class="setsec">Координаты цены</div>
+    <div id="dpCoords" class="al-grid2"></div>
+    <div class="setbtns"><button id="dpSave" class="btnpri" type="button">Применить</button><button id="dpCancel" class="btnsec" type="button">Отмена</button></div>
+  </div>
+</div></div>
 
 <div id="symDlg" class="dlg hidden"><div class="dlgbox symbox">
   <div class="symhead"><span id="symDlgTitle">Поиск символа</span><button id="symClose" class="setx">✕</button></div>

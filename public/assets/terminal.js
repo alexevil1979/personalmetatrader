@@ -585,14 +585,20 @@
       this.cfg = cfg;
       if (!cfg.indicators) cfg.indicators = [];
       if (!cfg.compares) cfg.compares = [];
-      this.ind = []; this.cmpSeries = []; this.subPovs = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null; this.replay = null;
+      this.ind = []; this.cmpSeries = []; this.subPovs = []; this.candles = []; this.loading = false; this.exhausted = false; this.topic = null; this.replay = null; this.plusPrice = null;
       this.indHidden = false; this.legCollapsed = false; this.lastCrossTime = null;
       this.el = document.createElement('div'); this.el.className = 'pane';
-      this.el.innerHTML = '<div class="cv"></div><div class="watermark"></div><div class="ohlc"></div><div class="load"></div><div class="cnt hidden"></div><div class="qtrade hidden"><button class="qt-sell" type="button">SELL</button><input class="qt-qty" type="number" step="any" min="0.0001" value="0.01"><button class="qt-buy" type="button">BUY</button></div>';
+      this.el.innerHTML = '<div class="cv"></div><div class="watermark"></div><div class="ohlc"></div><div class="load"></div><div class="cnt hidden"></div><button class="plusbtn hidden" type="button" title="Действие на уровне цены">+</button><button class="pane-max" type="button" title="Развернуть / восстановить панель (Alt+Enter)">⤢</button><div class="qtrade hidden"><button class="qt-sell" type="button">SELL</button><input class="qt-qty" type="number" step="any" min="0.0001" value="0.01"><button class="qt-buy" type="button">BUY</button></div>';
       host.appendChild(this.el);
       this.cv = this.el.querySelector('.cv'); this.wmEl = this.el.querySelector('.watermark');
       this.legend = this.el.querySelector('.ohlc'); this.loadEl = this.el.querySelector('.load');
       this.cntEl = this.el.querySelector('.cnt'); this.qtEl = this.el.querySelector('.qtrade');
+      this.plusEl = this.el.querySelector('.plusbtn'); this.maxEl = this.el.querySelector('.pane-max');
+      this.el.addEventListener('mouseleave', () => this.plusEl.classList.add('hidden'));
+      this.maxEl.addEventListener('mousedown', (e) => e.stopPropagation());
+      this.maxEl.onclick = (e) => { e.stopPropagation(); toggleMaxPane(this); };
+      this.plusEl.addEventListener('mousedown', (e) => e.stopPropagation());
+      this.plusEl.onclick = (e) => { e.stopPropagation(); if (this.plusPrice !== null) openPlusPriceMenu(this, this.plusPrice, e.clientX, e.clientY); };
       this.qtEl.addEventListener('mousedown', (e) => e.stopPropagation());
       this.qtEl.querySelector('.qt-buy').onclick = () => PMTTrade.quickMarket(this.cfg.category, this.cfg.symbol, 'buy', parseFloat(this.qtEl.querySelector('.qt-qty').value));
       this.qtEl.querySelector('.qt-sell').onclick = () => PMTTrade.quickMarket(this.cfg.category, this.cfg.symbol, 'sell', parseFloat(this.qtEl.querySelector('.qt-qty').value));
@@ -619,7 +625,7 @@
       this.chart = LightweightCharts.createChart(this.cv, { autoSize: true, crosshair: { mode: 0 }, timeScale: { timeVisible: true, rightOffset: 8 } });
       this.onReopen = () => this.refreshLatest();
       this.onMsg = (m) => this.live(m);
-      this.chart.subscribeCrosshairMove((p) => { this.cross(p); syncCrosshairFrom(this, p); });
+      this.chart.subscribeCrosshairMove((p) => { this.cross(p); this.updatePlusBtn(p); syncCrosshairFrom(this, p); });
       this.chart.subscribeClick((p) => { if (window.PMTTrade && PMTTrade.isPickingReplay() && p && p.time) PMTTrade.pickReplayBar(this, p.time); });
       this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
         if (r && r.from < 15) this.loadOlder();
@@ -792,6 +798,29 @@
       this.chart.timeScale().setVisibleRange({ from: Math.max(this.candles[0].time, from), to });
     }
     volData(c) { const t = chartTheme(); return c.map((k) => ({ time: k.time, value: k.volume, color: (k.close >= k.open ? t.up : t.dn) + '66' })); }
+    updatePlusBtn(p) {
+      if (!this.plusEl || !this.main || !p || !p.point || (window.PMTTrade && PMTTrade.isPickingReplay())) {
+        if (this.plusEl) this.plusEl.classList.add('hidden');
+        return;
+      }
+      const y = p.point.y;
+      let ph = this.cv.clientHeight - 28, pw = 56, rightVis = true;
+      try {
+        ph = this.chart.paneSize().height || ph;
+        rightVis = this.chart.priceScale('right').options().visible !== false;
+        pw = this.chart.priceScale(rightVis ? 'right' : 'left').width() || pw;
+      } catch { /* fallback */ }
+      if (y <= 6 || y >= ph - 6) { this.plusEl.classList.add('hidden'); return; }
+      let px = null;
+      try { px = this.main.coordinateToPrice(y); } catch { /* ignore */ }
+      if (px === null || !Number.isFinite(px)) { this.plusEl.classList.add('hidden'); return; }
+      this.plusPrice = +px.toFixed(this.precision());
+      this.plusEl.title = `Действие на ${this.plusPrice}`;
+      this.plusEl.style.top = Math.round(y) + 'px';
+      this.plusEl.style.right = rightVis ? (Math.round(pw) + 4) + 'px' : 'auto';
+      this.plusEl.style.left = rightVis ? 'auto' : (Math.round(pw) + 4) + 'px';
+      this.plusEl.classList.remove('hidden');
+    }
     render() {
       if (this.wmEl) this.wmEl.textContent = `${this.cfg.symbol} · ${this.tfLabel()}`;
       this.updateQuickTrade();
@@ -802,6 +831,7 @@
       this.vol.setData(this.volData(this.candles));
       this.refreshIndicators(true);
       this.cross(null);
+      if (this === panes[active]) PMTMarket.renderTaPanel(this);
     }
     async syncCompares() {
       this.clearCompares();
@@ -1152,6 +1182,59 @@
   }
 
   // ---------- UI wiring & Grid ----------
+  let maxPane = null;
+  function syncMaxPaneUi() {
+    if (maxPane && !panes.includes(maxPane)) maxPane = null;
+    const ch = $('#charts');
+    if (ch) ch.classList.toggle('max-mode', !!maxPane);
+    panes.forEach((p) => {
+      const on = p === maxPane;
+      p.el.classList.toggle('is-max', on);
+      if (p.maxEl) {
+        p.maxEl.classList.toggle('hidden', panes.length <= 1 && !on);
+        p.maxEl.textContent = on ? '🗗' : '⤢';
+      }
+    });
+    panes.forEach((p) => p.chart.resize(p.cv.clientWidth, p.cv.clientHeight));
+    requestAnimationFrame(() => panes.forEach((p) => p.chart.resize(p.cv.clientWidth, p.cv.clientHeight)));
+  }
+  function toggleMaxPane(pane) {
+    const target = pane || panes[active];
+    if (!target || (panes.length <= 1 && !maxPane)) return;
+    maxPane = maxPane === target ? null : target;
+    syncMaxPaneUi();
+  }
+  let plusMenu = null;
+  const hidePlusMenu = () => { if (plusMenu) { plusMenu.remove(); plusMenu = null; } };
+  function openPlusPriceMenu(p, price, x, y) {
+    hidePlusMenu();
+    const m = document.createElement('div');
+    m.className = 'ctxmenu';
+    m.innerHTML = `<div class="mi" data-pa="alert">🔔 Алерт на ${price}</div>`
+      + `<div class="mi" data-pa="buy">📈 Купить Limit/Stop на ${price}</div>`
+      + `<div class="mi" data-pa="sell">📉 Продать Limit/Stop на ${price}</div>`
+      + `<div class="mi" data-pa="hline">─ Горизонтальная линия на ${price}</div>`;
+    m.style.left = Math.min(x, window.innerWidth - 220) + 'px';
+    m.style.top = Math.min(y, window.innerHeight - 160) + 'px';
+    document.body.appendChild(m);
+    plusMenu = m;
+    setTimeout(() => document.addEventListener('mousedown', hidePlusMenu, { once: true }), 0);
+    m.onclick = (e) => {
+      const it = e.target.closest('[data-pa]'); if (!it) return;
+      const act = it.dataset.pa;
+      hidePlusMenu();
+      if (act === 'alert') openAlertModal({ category: p.cfg.category, symbol: p.cfg.symbol, tf: p.cfg.tf, price });
+      else if (act === 'buy' || act === 'sell') PMTTrade.quickOrderAt(p.cfg.category, p.cfg.symbol, act, price);
+      else if (act === 'hline') {
+        const t = p.candles.length ? p.candles[p.candles.length - 1].time : Math.floor(Date.now() / 1000);
+        p.dw.snapshot();
+        const id = Date.now() + Math.floor(Math.random() * 1000);
+        p.dw.objs.push({ id, type: 'hline', pts: [{ t, p: price }], style: { color: '#2962ff', width: 1 } });
+        p.dw.select(id); p.dw.save(); p.dw.request();
+      }
+    };
+  }
+
   function setActive(i) {
     if (i < 0 || !panes[i]) return;
     active = i; panes.forEach((p, k) => p.el.classList.toggle('active', k === i));
@@ -1164,8 +1247,9 @@
     document.querySelectorAll('#typeMenu .mi').forEach((m) => m.classList.toggle('on', m.dataset.type === c.type));
     loadSymbols(c.category).catch(() => {});
     renderWatch(); syncWatchWs(); renderObjTree(); updateInfo(); updateObjBar();
-    syncBottomScaleUi();
+    syncBottomScaleUi(); syncMaxPaneUi();
     PMTMarket.syncDom(c.category, c.symbol);
+    PMTMarket.renderTaPanel(panes[i]);
   }
   function syncBottomScaleUi() {
     const p = panes[active];
@@ -1252,6 +1336,7 @@
   }
 
   function ensureLayout() {
+    maxPane = null;
     const lay = state.layout = normLayout(state.layout);
     const n = { '1': 1, '2v': 2, '2h': 2, '3': 3, '4': 4, '6': 6 }[lay] || 1;
     $('#charts').className = 'l' + lay;
@@ -1623,6 +1708,7 @@
     activate: (p) => { const i = panes.indexOf(p); if (i >= 0 && i !== active) setActive(i); },
     toolDone: () => setTool('cursor'),
     onSel: (dw) => { if (panes[active] && panes[active].dw === dw) { updateObjBar(); renderObjTree(); } },
+    onDblClick: (dw, o) => { const p = panes.find((x) => x.dw === dw); if (p) openDrawingProps(p, o); },
     onServiceChange: (dw, o) => {
       const p = panes.find((x) => x.dw === dw); if (!p || !o) return;
       const price = +o.pts[0].p.toFixed(p.precision());
@@ -1677,9 +1763,58 @@
     $('#objAlpha').value = Math.round((st.fillAlpha !== undefined ? st.fillAlpha : 0.14) * 100);
     $('#objAlpha').classList.toggle('hidden', !['rect', 'ellipse', 'channel', 'callout', 'pricerange', 'daterange'].includes(o.type));
     $('#objLock').textContent = locked ? '🔒' : '🔓';
+    $('#objProps').classList.toggle('hidden', isSvc);
     $('#objLock').classList.toggle('hidden', isSvc);
     $('#objClone').classList.toggle('hidden', isSvc);
     $('#objColor').disabled = $('#objWidth').disabled = $('#objDash').disabled = $('#objAlpha').disabled = locked;
+  }
+  let dpTarget = null, dpWired = false;
+  function openDrawingProps(p, o) {
+    if (!p || !o || o.id < 0) return;
+    dpTarget = { p, o };
+    const dlg = $('#drawPropsDlg'), st = o.style || {}, prec = p.precision();
+    $('#dpTitle').textContent = 'Свойства: ' + (PMTDraw.NAMES[o.type] || o.type);
+    $('#dpColor').value = PMTDraw.colorOf(o);
+    $('#dpWidth').value = st.width || 1;
+    $('#dpDash').value = st.dash || 'solid';
+    $('#dpAlpha').value = Math.round((st.fillAlpha !== undefined ? st.fillAlpha : 0.14) * 100);
+    $('#dpText').value = st.text || '';
+    $('#dpExtL').checked = !!st.extendLeft;
+    $('#dpExtR').checked = !!st.extendRight;
+    $('#dpLock').checked = !!st.locked;
+    const labels = (o.type === 'longpos' || o.type === 'shortpos') ? ['Вход', 'Цель (TP)', 'Стоп (SL)'] : o.pts.map((_, idx) => `Цена ${idx + 1}`);
+    $('#dpCoords').innerHTML = o.pts.map((pt, idx) =>
+      `<label class="setlab">${labels[idx] || ('Точка ' + (idx + 1))} <input type="number" step="any" data-dpp="${idx}" value="${pt.p.toFixed(prec)}"></label>`
+    ).join('');
+    if (!dpWired) {
+      dpWired = true;
+      const close = () => dlg.classList.add('hidden');
+      $('#dpClose').onclick = $('#dpCancel').onclick = close;
+      dlg.onmousedown = (e) => { if (e.target === dlg) close(); };
+      $('#dpSave').onclick = () => {
+        if (!dpTarget) return;
+        const { p: pane, o: obj } = dpTarget;
+        pane.dw.snapshot();
+        const s = obj.style || (obj.style = {});
+        s.color = $('#dpColor').value;
+        s.width = Math.min(6, Math.max(1, +$('#dpWidth').value || 1));
+        s.dash = $('#dpDash').value;
+        s.fillAlpha = Math.max(0, Math.min(0.6, (+$('#dpAlpha').value || 0) / 100));
+        s.text = $('#dpText').value;
+        s.extendLeft = $('#dpExtL').checked;
+        s.extendRight = $('#dpExtR').checked;
+        s.locked = $('#dpLock').checked;
+        dlg.querySelectorAll('[data-dpp]').forEach((inp) => {
+          const val = parseFloat(inp.value);
+          if (Number.isFinite(val) && obj.pts[+inp.dataset.dpp]) obj.pts[+inp.dataset.dpp].p = val;
+        });
+        pane.dw.save(); pane.dw.request();
+        updateObjBar(); renderObjTree();
+        close();
+        PMTUx.toast('Свойства объекта обновлены', 'ok');
+      };
+    }
+    dlg.classList.remove('hidden');
   }
   function renderObjTree() {
     const host = $('#objTree'); if (!host || !panes[active]) return;
@@ -1720,6 +1855,7 @@
     $('#objDash').onchange = (e) => mutStyle((st) => { st.dash = e.target.value; });
     $('#objAlpha').oninput = (e) => mutStyle((st) => { st.fillAlpha = (+e.target.value || 0) / 100; });
     $('#objLock').onclick = () => { const p = panes[active], o = p.dw.selected(); if (!o || o.id < 0) return; p.dw.snapshot(); o.style = o.style || {}; o.style.locked = !o.style.locked; p.dw.save(); p.dw.request(); };
+    $('#objProps').onclick = () => { const p = panes[active], o = p && p.dw.selected(); if (o && o.id >= 0) openDrawingProps(p, o); };
     $('#objClone').onclick = () => { panes[active] && panes[active].dw.cloneSelected(); };
     $('#objDel').onclick = () => { const r = panes[active].dw.remove(); if (r === 'locked') PMTUx.toast('Объект заблокирован', 'err'); };
     window.addEventListener('keydown', (e) => {
@@ -1735,12 +1871,15 @@
       $('#tabObj').classList.toggle('on', tab === 'obj');
       $('#tabAlerts').classList.toggle('on', tab === 'alerts');
       $('#tabDom').classList.toggle('on', tab === 'dom');
+      $('#tabTa').classList.toggle('on', tab === 'ta');
       $('#watchPan').classList.toggle('hidden', tab !== 'watch');
       $('#objTreePan').classList.toggle('hidden', tab !== 'obj');
       $('#alertsPan').classList.toggle('hidden', tab !== 'alerts');
       $('#domPan').classList.toggle('hidden', tab !== 'dom');
+      $('#taPan').classList.toggle('hidden', tab !== 'ta');
       if (tab === 'obj') renderObjTree();
       if (tab === 'alerts') refreshAlerts(false);
+      if (tab === 'ta') PMTMarket.renderTaPanel(panes[active]);
       const c = panes[active] && panes[active].cfg;
       PMTMarket.setDomVisible(tab === 'dom', c && c.category, c && c.symbol);
     };
@@ -1748,6 +1887,7 @@
     $('#tabObj').onclick = () => setSideTab('obj');
     $('#tabAlerts').onclick = () => setSideTab('alerts');
     $('#tabDom').onclick = () => setSideTab('dom');
+    $('#tabTa').onclick = () => setSideTab('ta');
     $('#objTree').onclick = (e) => {
       const p = panes[active]; if (!p) return;
       const cmp = e.target.closest('[data-ot-cmp]');
@@ -2379,6 +2519,7 @@ if showLabels and ta.crossunder(close, ma)
       openSearch: (q) => openSymbolPicker(q),
       setTf: (tf) => applyToPanes({ tf }),
       resetView: () => panes[active] && panes[active].resetView(),
+      toggleMaxPane: () => toggleMaxPane(panes[active]),
       goToDate: () => panes[active] && PMTUx.openGoToDate(panes[active], state.tz),
       screenshot: () => panes[active] && PMTUx.takeScreenshot(panes[active]),
       setTool,
@@ -2461,6 +2602,10 @@ if showLabels and ta.crossunder(close, ma)
 
     $('#btnRuler').onclick = () => setRuler(!rulerMode);
     $('#btnShot').onclick = () => panes[active] && PMTUx.takeScreenshot(panes[active]);
+    $('#btnFull').onclick = () => {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else document.documentElement.requestFullscreen().catch(() => {});
+    };
 
     $('#category').onchange = async (e) => {
       const cat = e.target.value; const list = await loadSymbols(cat).catch(() => []);

@@ -446,6 +446,7 @@
       if (e.altKey && !e.ctrlKey && !e.metaKey) {
         const k = e.key.toLowerCase();
         if (k === 'r') { e.preventDefault(); hooks.resetView(); }
+        else if (k === 'enter') { e.preventDefault(); hooks.toggleMaxPane && hooks.toggleMaxPane(); }
         else if (k === 'g') { e.preventDefault(); hooks.goToDate(); }
         else if (k === 's') { e.preventDefault(); hooks.screenshot(); }
         else if (k === 'h') { e.preventDefault(); hooks.setTool('hline'); }
