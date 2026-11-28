@@ -300,7 +300,7 @@
     mk.sort((a, b) => a.i - b.i);
     return { markers: mk };
   });
-  add('sr', 'Support/Resistance', 'Дополнительно', true, [P('lookback', 'Баров назад', 300), P('swing', 'Swing', 5), P('tol', 'Допуск %', 0.3, { step: 0.05 }), P('max', 'Макс. уровней', 6)],
+  add('sr', 'Support/Resistance', 'Дополнительно', true, [P('lookback', 'Баров назад', 300), P('swing', 'Swing', 5), P('tol', 'Допуск %', 0.3, { step: 0.05 }), P('max', 'Макс. уровней', 6, { min: 1, max: 500 })],
     [O('levels', 'Уровни', '#7d8590', 'levels')], (c, p) => {
       const n = c.length, s = Math.max(0, n - p.lookback), d = cols(c.slice(s)), sw = swings(d, p.swing, p.swing);
       const pts = sw.hi.map((i) => ({ v: d.h[i], i })).concat(sw.lo.map((i) => ({ v: d.l[i], i }))).sort((a, b) => a.v - b.v);
@@ -417,7 +417,7 @@
       return { markers: mk, bg };
     });
 
-  add('fvg', 'Fair Value Gaps (FVG)', 'Smart Money', true, [P('minPct', 'Мин. гэп %', 0.15, { min: 0, step: 0.05 }), P('maxZones', 'Макс. зон', 16, { min: 2, max: 40 })],
+  add('fvg', 'Fair Value Gaps (FVG)', 'Smart Money', true, [P('minPct', 'Мин. гэп %', 0.15, { min: 0, step: 0.05 }), P('maxZones', 'Макс. зон', 100, { min: 2, max: 5000 })],
     [O('markers', 'FVG', '#26a69a', 'markers')], (c, p) => {
       const boxes = [], n = c.length;
       for (let i = 2; i < n; i++) {
@@ -469,10 +469,10 @@
           markers.push({ i, pos: 'above', color: '#ef5350', text: kind });
         }
       }
-      return { levels: levels.slice(-24), markers: markers.slice(-30) };
+      return { levels: levels.slice(-5000), markers: markers.slice(-5000) };
     });
 
-  add('linreg', 'Linear Regression Channel', 'Каналы', true, [P('len', 'Период', 50, { min: 5, max: 300 }), P('mult', 'Множитель σ', 2, { min: 0.5, step: 0.25 })],
+  add('linreg', 'Linear Regression Channel', 'Каналы', true, [P('len', 'Период', 50, { min: 5, max: 10000 }), P('mult', 'Множитель σ', 2, { min: 0.5, step: 0.25 })],
     [O('mid', 'Mid', '#2962ff'), O('up', 'Upper', '#26a69a'), O('dn', 'Lower', '#ef5350')], (c, p) => {
       const n = c.length, len = Math.max(2, Math.round(p.len)), mid = nul(n), up = nul(n), dn = nul(n);
       const sx = (len * (len - 1)) / 2, sxx = ((len - 1) * len * (2 * len - 1)) / 6, denom = len * sxx - sx * sx;

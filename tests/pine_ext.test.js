@@ -166,4 +166,28 @@ assert.ok(r.logs.some((x) => x.includes('[INFO] bar 10')) && r.logs.some((x) => 
 assert.throws(() => go('if bar_index == 5\n    runtime.error("boom")\nplot(close)'), /boom/);
 console.log('OK barcolor / alert / log / runtime.error / input options');
 
+// ---- 500x object & bar limits: > 500 labels/lines over 3,000 bars in O(1) amortized time ----
+const bigC = [];
+for (let i = 0; i < 3000; i++) {
+  const b = C[i % C.length];
+  bigC.push({ ...b, time: 1700000000 + i * 3600 });
+}
+const t0 = Date.now();
+const bigR = run({
+  source: `//@version=5
+indicator("500x", overlay=true, max_labels_count=5000, max_lines_count=5000)
+label.new(bar_index, high, "L")
+if bar_index > 0
+    line.new(bar_index - 1, low[1], bar_index, low)
+plot(close, "c")
+`,
+  candles: bigC, inputs: {}, symbol: 'X', periodMin: 60, point: 0.01, extra: {},
+});
+const elapsedMs = Date.now() - t0;
+assert.ok(bigR.ok, '3000-bar script failed: ' + bigR.error);
+assert.strictEqual(bigR.labels.length, 3000, 'should retain all 3000 labels (>500)');
+assert.strictEqual(bigR.lines.length, 2999, 'should retain all 2999 lines (>500)');
+assert.ok(elapsedMs < 3000, `too slow: ${elapsedMs}ms`);
+console.log(`OK 500x scale (3000 labels + 2999 lines in ${elapsedMs}ms)`);
+
 console.log('ALL PINE EXTENSION TESTS PASSED');

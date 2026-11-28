@@ -6,19 +6,19 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 const PORT = +(process.env.MQL_PORT || 18090), SECRET = process.env.MQL_SECRET || '';
-const MAX_BODY = 25e6, MAX_PAR = 3, MAX_QUEUE = 20, TIMEOUT_S = 12;
+const MAX_BODY = 100e6, MAX_PAR = 3, MAX_QUEUE = 20, TIMEOUT_S = 30;
 if (SECRET.length < 24) { console.error('MQL_SECRET (>=24 chars) is required'); process.exit(1); }
 
 let running = 0; const queue = [];
 function runJob(body) {
-  const m = /^\{"timeoutS":(\d{1,2})[,}]/.exec(body.slice(0, 40)); const tmo = m ? Math.min(40, Math.max(5, +m[1])) : TIMEOUT_S; // strategy tests may need longer (hard-capped)
+  const m = /^\{"timeoutS":(\d{1,2})[,}]/.exec(body.slice(0, 40)); const tmo = m ? Math.min(60, Math.max(5, +m[1])) : TIMEOUT_S; // strategy tests may need longer (hard-capped)
   return new Promise((resolve) => {
-    const args = ['--as=3500000000', `--cpu=${tmo + 3}`, '--nofile=64', '--fsize=0', '--core=0', '--nproc=64', '--',
-      'timeout', '-s', 'KILL', String(tmo), 'unshare', '-rn', process.execPath, '--max-old-space-size=300', path.join(__dirname, 'runner.js')];
+    const args = ['--as=5500000000', `--cpu=${tmo + 3}`, '--nofile=64', '--fsize=0', '--core=0', '--nproc=64', '--',
+      'timeout', '-s', 'KILL', String(tmo), 'unshare', '-rn', process.execPath, '--max-old-space-size=1024', path.join(__dirname, 'runner.js')];
     const ch = spawn('prlimit', args, { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: '/usr/bin:/bin' } });
     let out = '', err = '', done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
-    ch.stdout.on('data', (c) => { out += c; if (out.length > 60e6) { ch.kill('SIGKILL'); finish({ ok: false, error: 'output too large' }); } });
+    ch.stdout.on('data', (c) => { out += c; if (out.length > 200e6) { ch.kill('SIGKILL'); finish({ ok: false, error: 'output too large' }); } });
     ch.stderr.on('data', (c) => { if (err.length < 2000) err += c; });
     ch.on('close', (code, sig) => {
       if (out) { try { return finish(JSON.parse(out)); } catch { /* fallthrough */ } }

@@ -34,7 +34,7 @@ function run(req) {
   const B = RT.makeB(env), st = B.st; st.inputs = [];
   const origInp = B.inp; B.inp = (name, dflt, kind) => { st.inputs.push({ name, default: dflt, kind }); return origInp(name, dflt, kind); };
   const ctx = vm.createContext({ B }, { codeGeneration: { strings: false, wasm: false } });
-  const prog = vm.runInContext(`(function(B){${js}})`, ctx, { timeout: 4000, filename: 'mql-program' })(B);
+  const prog = vm.runInContext(`(function(B){${js}})`, ctx, { timeout: 15000, filename: 'mql-program' })(B);
   const props = meta.props;
   const info = {
     window: propVal(props, 'indicator_separate_window') !== undefined ? 'separate' : 'chart',
@@ -100,7 +100,7 @@ function run(req) {
 
 let buf = '';
 process.stdin.setEncoding('utf8');
-process.stdin.on('data', (c) => { buf += c; if (buf.length > 40e6) process.exit(3); });
+process.stdin.on('data', (c) => { buf += c; if (buf.length > 100e6) process.exit(3); });
 process.stdin.on('end', () => {
   let out;
   try { out = run(JSON.parse(buf)); } catch (e) {

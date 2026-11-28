@@ -62,22 +62,38 @@
         this.drawHlines(ctx, res, W);
         this.drawBoxes(ctx, res, W, H);
         this.drawLines(ctx, res, W, H);
-        this.drawLabels(ctx, res);
+        this.drawLabels(ctx, res, W);
         this.drawTables(ctx, res, W, H);
       }
       ctx.restore();
     }
+    visRange(res) {
+      const t = res.times || [], n = t.length;
+      if (!n) return [0, -1];
+      let lr = null;
+      try { lr = this.pane.chart.timeScale().getVisibleLogicalRange(); } catch { /* ignore */ }
+      if (!lr) return [0, n - 1];
+      const dw = this.pane.dw, fromT = dw.lToT(Math.floor(lr.from - this.off) - 2), toT = dw.lToT(Math.ceil(lr.to - this.off) + 2);
+      let lo = 0, hi = n - 1;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (t[m] < fromT) lo = m + 1; else hi = m; }
+      const s = Math.max(0, lo - 1);
+      lo = s; hi = n - 1;
+      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (t[m] > toT) hi = m - 1; else lo = m; }
+      return [s, Math.min(n - 1, hi + 1)];
+    }
     drawBg(ctx, res, W, H) {
       if (!res.bg) return;
-      for (let i = 0; i < res.bg.length; i++) {
+      const [s, e] = this.visRange(res);
+      for (let i = s; i <= e; i++) {
         const c = res.bg[i]; if (!c) continue;
         const x = this.X(res, i), x2 = this.X(res, i + 1); if (x === null || x2 === null || x2 < 0 || x > W) continue;
         const w = Math.max(1, x2 - x); ctx.fillStyle = c; ctx.fillRect(x - w / 2, 0, w, H);
       }
     }
     drawFills(ctx, res, W) {
+      const [s, e] = this.visRange(res);
+      if (e < s) return;
       for (const f of res.fills || []) {
-        const n = res.times.length;
         const valAt = (ref, i) => {
           if (ref.kind === 'hline') return ref.price;
           const pl = res.plots[ref.idx]; if (!pl) return null;
@@ -97,7 +113,7 @@
           }
           segPts = [];
         };
-        for (let i = 0; i < n; i++) {
+        for (let i = s; i <= e; i++) {
           const v1 = valAt(f.a, i), v2 = valAt(f.b, i), col = f.colors[i];
           if (v1 === null || v2 === null || !col) { flush(); curCol = null; continue; }
           const x = this.X(res, i), y1 = this.Y(v1), y2 = this.Y(v2);
@@ -124,6 +140,7 @@
         const bt = (v) => (l.xloc === 'bar_time' ? this.Xt(v) : this.X(res, v));
         let x1 = bt(l.x1), x2 = bt(l.x2); const y1 = this.Y(l.y1), y2 = this.Y(l.y2);
         if (x1 === null || x2 === null || y1 === null || y2 === null) continue;
+        if (l.extend === 'none' && (Math.max(x1, x2) < -20 || Math.min(x1, x2) > W + 20)) continue;
         let a = { x: x1, y: y1 }, b = { x: x2, y: y2 };
         if (l.extend !== 'none') {
           const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, k = (W + H) * 4 / len;
@@ -142,6 +159,7 @@
         const bt = (v) => (b.xloc === 'bar_time' ? this.Xt(v) : this.X(res, v));
         let x1 = bt(b.left), x2 = bt(b.right); const y1 = this.Y(b.top), y2 = this.Y(b.bottom);
         if (x1 === null || x2 === null || y1 === null || y2 === null) continue;
+        if (b.extend === 'none' && (Math.max(x1, x2) < -20 || Math.min(x1, x2) > W + 20)) continue;
         if (b.extend === 'left' || b.extend === 'both') x1 = -10; if (b.extend === 'right' || b.extend === 'both') x2 = W + 10;
         const x = Math.min(x1, x2), y = Math.min(y1, y2), w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
         if (b.bgcolor) { ctx.fillStyle = b.bgcolor; ctx.fillRect(x, y, w, h); }
@@ -149,10 +167,10 @@
         if (b.text) { ctx.font = `${FONT[b.textSize] || 12}px sans-serif`; ctx.fillStyle = b.textColor; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.text, x + w / 2, y + h / 2); }
       }
     }
-    drawLabels(ctx, res) {
+    drawLabels(ctx, res, W) {
       for (const lb of res.labels || []) {
         const bi = lb.xloc === 'bar_time' ? null : lb.x, x = lb.xloc === 'bar_time' ? this.Xt(lb.x) : this.X(res, bi);
-        if (x === null || x < -50) continue;
+        if (x === null || x < -150 || x > W + 150) continue;
         let ay, style = lb.style;
         if (lb.yloc === 'abovebar' || lb.yloc === 'belowbar') {
           const c = this.candleAt(this.barTime(res, lb.x)); if (!c) continue;

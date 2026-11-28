@@ -54,7 +54,7 @@ function makeB(env) {
   };
   const str = (x) => (typeof x === 'number' && !Number.isInteger(x) ? x.toFixed(8).replace(/0+$/, '') : String(x));
   const B = {
-    K, Arr, n: 0, limit: 3e7, lim() { throw new MqlError('execution limit exceeded (too many loop iterations)'); }, st, logs, d,
+    K, Arr, n: 0, limit: 3e8, lim() { throw new MqlError('execution limit exceeded (too many loop iterations)'); }, st, logs, d,
     def(o) { Object.assign(K, o); },
     idiv(a, b) { if (b === 0) throw new MqlError('zero divide'); return Math.trunc(a / b); },
     s2i(s) { return parseInt(s, 10) || 0; }, s2d(s) { return parseFloat(s) || 0; },

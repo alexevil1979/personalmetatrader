@@ -17,7 +17,7 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_UNIX AF_INET
-MemoryMax=1500M
+MemoryMax=3000M
 TasksMax=200
 
 [Install]

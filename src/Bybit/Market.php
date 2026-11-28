@@ -307,9 +307,33 @@ final class Market
         return self::format($rows);
     }
 
-    /** Latest $n candles ascending (up to optional $endSec), paged back through candles() (uses the MySQL cache for older pages). */
+    /** Latest $n candles ascending (up to optional $endSec), DB-first when backfilled or paged via candles(). */
     public static function candlesN(string $category, string $symbol, string $tf, int $n, ?int $endSec = null): array
     {
+        $n = max(1, min(100000, $n));
+        $sid = self::symbolId($category, $symbol);
+        $step = self::TF[$tf] * 1000;
+        $sync = self::syncState($sid, $tf);
+        if ($sync && (int) $sync['backfill_done'] === 1 && $sync['latest_ms'] !== null) {
+            $nowMs = (int) (microtime(true) * 1000);
+            $latestMs = (int) $sync['latest_ms'];
+            $fresh = $endSec !== null
+                ? ($endSec * 1000 <= $latestMs + max($step, 86400000))
+                : ($latestMs >= $nowMs - max($step * 2, 300000));
+            if ($fresh) {
+                $pdo = Db::pdo();
+                $sql = $endSec !== null
+                    ? 'SELECT open_time, open, high, low, close, volume FROM market_candles WHERE symbol_id=? AND tf=? AND open_time<=? ORDER BY open_time DESC LIMIT ' . $n
+                    : 'SELECT open_time, open, high, low, close, volume FROM market_candles WHERE symbol_id=? AND tf=? ORDER BY open_time DESC LIMIT ' . $n;
+                $st = $pdo->prepare($sql);
+                $st->execute($endSec !== null ? [$sid, $tf, $endSec * 1000] : [$sid, $tf]);
+                $rows = $st->fetchAll();
+                if ($rows) {
+                    return self::format(array_reverse($rows));
+                }
+            }
+        }
+
         $all = [];
         $end = $endSec !== null ? $endSec * 1000 : null;
         while (count($all) < $n) {

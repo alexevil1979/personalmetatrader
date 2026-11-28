@@ -5,7 +5,7 @@
   const LAYOUT_LABELS = { '1': '▢', '2v': '◫', '2h': '⬓', '3': '◧', '4': '⊞', '6': '⊟' };
   const CMP_COLORS = ['#ff9800', '#e91e63', '#00bcd4', '#9c27b0', '#4caf50'];
   const DEFAULT_WATCH = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'BNBUSDT', 'ADAUSDT', 'LINKUSDT', 'AVAXUSDT', 'TONUSDT'];
-  const PAGE = 1000, MAX_CANDLES = 100000;
+  const PAGE = 1000, MAX_CANDLES = 250000;
 
   const $ = (s) => document.querySelector(s);
   const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -1085,13 +1085,13 @@
 
     // ---------- MQL scripts ----------
     mqlSt(inst) { return (this.mql = this.mql || {})[inst.uid] || (this.mql[inst.uid] = {}); }
-    mqlKey(inst) { const n = this.candles.length; return [this.replay ? 'R' : 'L', this.cfg.category, this.cfg.symbol, this.cfg.tf, inst.scriptId, inst.version || 0, JSON.stringify(inst.params), n ? this.candles[n - 1].time : 0].join('|'); }
+    mqlKey(inst) { const n = this.candles.length; return [this.replay ? 'R' : 'L', this.cfg.category, this.cfg.symbol, this.cfg.tf, inst.scriptId, inst.version || 0, JSON.stringify(inst.params), n, n ? this.candles[0].time : 0, n ? this.candles[n - 1].time : 0].join('|'); }
     async runMql(inst, force) {
       const st = this.mqlSt(inst), key = this.mqlKey(inst);
       if (st.busy || !this.candles.length || (!force && st.key === key) || (!this.replay && force && Date.now() - (st.at || 0) < 5000)) return;
       st.busy = true; st.at = Date.now();
       const wasReplay = !!this.replay, lastT = this.candles[this.candles.length - 1].time;
-      const body = { id: inst.scriptId, category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, inputs: inst.params, limit: 1500, version: inst.version };
+      const body = { id: inst.scriptId, category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, inputs: inst.params, limit: Math.max(1500, Math.min(100000, this.candles.length)), version: inst.version };
       if (wasReplay) body.endTime = lastT;
       try {
         const r = await call('POST', 'mql/run', null, body);

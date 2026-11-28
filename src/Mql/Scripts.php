@@ -193,7 +193,7 @@ final class Scripts
         if (!in_array($r['lang'], ['mq4', 'mq5', 'pine'], true)) {
             return ['ok' => false, 'error' => 'EX4/EX5 не исполняются: нужна среда MetaTrader (см. docs/MQL.md)', 'kind' => 'unsupported'];
         }
-        $limit = max(50, min(3000, $limit));
+        $limit = max(50, min(100000, $limit));
         $candles = Market::candlesN($cat, $sym, $tf, $limit, $endSec);
         $info = Db::pdo()->prepare('SELECT price_scale, tick_size FROM trading_symbols WHERE exchange_id=1 AND category=? AND symbol=?');
         $info->execute([$cat, $sym]);
@@ -217,7 +217,7 @@ final class Scripts
                 if ($sec < $mainSec) {
                     return ['ok' => false, 'error' => 'request.security: таймфрейм "' . $stf . '" ниже таймфрейма графика — не поддерживается', 'kind' => 'mql'];
                 }
-                $htfBars = Market::candlesN($cat, $sym, (string) $stf, min(1500, (int) ceil($limit * $mainSec / $sec) + 10), $endSec);
+                $htfBars = Market::candlesN($cat, $sym, (string) $stf, min(100000, (int) ceil($limit * $mainSec / $sec) + 10), $endSec);
                 // Prevent future OHLC leakage on the currently forming HTF bar during replay
                 if ($endSec !== null && $htfBars) {
                     $lastIdx = count($htfBars) - 1;
@@ -246,11 +246,12 @@ final class Scripts
             }
         }
         $t0 = microtime(true);
+        $timeoutS = count($candles) > 5000 ? 45 : 25;
         $res = self::exec([
             'mode' => 'run', 'lang' => $r['lang'], 'source' => $source, 'extra' => (object) $extra,
             'candles' => $candles, 'inputs' => (object) $inputs, 'symbol' => $sym, 'periodMin' => self::PERIOD_MIN[$tf] ?? 60,
             'digits' => (int) $si['price_scale'], 'point' => (float) $si['tick_size'],
-        ]);
+        ], $timeoutS);
         $ms = (int) ((microtime(true) - $t0) * 1000);
         $lvl = ($res['ok'] ?? false) ? 'info' : 'error';
         $msg = ($res['ok'] ?? false) ? 'run ok' : ('run failed: ' . ($res['error'] ?? '?') . (isset($res['line']) ? ' (line ' . $res['line'] . ')' : ''));
