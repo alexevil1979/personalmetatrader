@@ -405,3 +405,4 @@ body.nolegend .pane .ohlc{display:none}
 .ref-item:hover{background:var(--bg)}
 .ref-item code{font:600 10.5px/1.25 Consolas,monospace;color:var(--acc);word-break:break-word}
 .ref-item span{color:var(--mut);font-size:10px}
+.hist-wrap{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:6px;margin-top:6px}

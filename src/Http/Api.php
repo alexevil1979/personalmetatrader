@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace PMT\Http;
 
 use InvalidArgumentException;
+use PMT\Bybit\HistorySync;
 use PMT\Bybit\Market;
 use PMT\Core\Alerts;
 use PMT\Core\Auth;
@@ -551,6 +552,7 @@ final class Api
                         $find->execute([$cat, Market::checkSymbol((string) $s)]);
                         if ($sid = $find->fetchColumn()) {
                             $ins->execute([$wid, $sid, $i]);
+                            Market::enqueueSymbol((int) $sid, true, 1);
                         }
                     }
                     $pdo->commit();
@@ -564,6 +566,21 @@ final class Api
                 $st = $pdo->prepare('SELECT s.symbol FROM watchlist_symbols w JOIN trading_symbols s ON s.id=w.symbol_id WHERE w.watchlist_id=? ORDER BY w.sort_order');
                 $st->execute([$wid]);
                 self::out(['symbols' => $st->fetchAll(\PDO::FETCH_COLUMN)]);
+                return;
+            case '/api/history/status':
+                self::out(HistorySync::status($pdo));
+                return;
+            case '/api/history/sync':
+                if ($method !== 'POST') {
+                    self::out(['error' => 'method'], 405);
+                    return;
+                }
+                $b = self::body(4096);
+                $cat = Market::checkCategory((string) ($b['category'] ?? 'linear'));
+                $sym = Market::checkSymbol((string) ($b['symbol'] ?? ''));
+                $sid = Market::symbolId($cat, $sym);
+                Market::enqueueSymbol($sid, true, 1);
+                self::out(['ok' => true, 'category' => $cat, 'symbol' => $sym]);
                 return;
         }
         self::out(['error' => 'not found'], 404);

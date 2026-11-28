@@ -12,7 +12,7 @@ use PMT\Core\Log;
 final class Tester
 {
     private const PERIOD_MIN = ['1' => 1, '3' => 3, '5' => 5, '15' => 15, '30' => 30, '60' => 60, '120' => 120, '240' => 240, '360' => 360, '720' => 720, 'D' => 1440, 'W' => 10080, 'M' => 43200];
-    private const MAX_BARS = 20000;
+    private const MAX_BARS = 100000;
 
     private static function prepareRun(int $uid, array $b): array
     {
@@ -25,9 +25,14 @@ final class Tester
         $sym = Market::checkSymbol((string) ($b['symbol'] ?? ''));
         $tf = Market::checkTf((string) ($b['tf'] ?? '60'));
         $to = (int) ($b['to'] ?? time());
-        $from = (int) ($b['from'] ?? ($to - 90 * 86400));
-        if ($from >= $to || $to - $from > 3 * 365 * 86400) {
-            throw new InvalidArgumentException('Период: от 1 дня до 3 лет');
+        $allHistory = ($b['period'] ?? '') === 'all' || (isset($b['from']) && (int) $b['from'] === 0);
+        if ($allHistory) {
+            $from = Market::earliestTime($cat, $sym, $tf) ?? ($to - 7 * 365 * 86400);
+        } else {
+            $from = (int) ($b['from'] ?? ($to - 90 * 86400));
+        }
+        if ($from >= $to || $to - $from > 10 * 365 * 86400) {
+            throw new InvalidArgumentException('Период: от 1 дня до 10 лет');
         }
         $inputs = is_array($b['inputs'] ?? null) ? $b['inputs'] : [];
         foreach ($inputs as $k => $v) {

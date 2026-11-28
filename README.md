@@ -38,7 +38,8 @@ Production: `https://pmt.1tlt.ru`
   - Исполнение на next-open, внутрибарные Stop/Limit/Trailing Stop, комиссии и проскальзывание; метрики Net Profit, Profit Factor, Win Rate, Sharpe/Sortino, CAGR, MAE/MFE, разделение Long/Short.
   - Переключение кривой доходности `$ / %` и сравнение с Buy & Hold, карта доходности по месяцам (Heatmap), сетка **оптимизации параметров** (до 36 комбинаций), экспорт сделок в CSV, переходы по сделкам на график. Подробнее: [docs/STRATEGY_TESTER.md](docs/STRATEGY_TESTER.md).
 
-### Рынок, Симулятор баров, Paper Trading и Bybit Read-Only
+### Рынок, История в БД, Симулятор баров, Paper Trading и Bybit Read-Only
+- **Максимальная история свечей в MySQL (DB-first):** фоновый сервис [deploy/pmt-history.service](deploy/pmt-history.service) ([HistorySync.php](src/Bybit/HistorySync.php), [bin/backfill.php](bin/backfill.php)) автоматически докачивает всю доступную глубину Bybit до генезиса по всем 13 таймфреймам для инструментов пользователя и базовые ТФ для всех контрактов биржи с защитой свободного места на диске (`HISTORY_MIN_FREE_GB`, по умолчанию `25` ГБ). Мониторинг в `Настройки → История БД`.
 - **Watchlist Pro:** мультилисты, цветовые флаги, сортировка, drag-and-drop, импорт/экспорт, живые тикеры по WebSocket.
 - **Стакан заявок (DOM) и Лента сделок** + **Скринер рынка Bybit и Тепловая карта (Heatmap)** в [market_panels.js](public/assets/market_panels.js).
 - **Симулятор баров (Bar Replay):** откат к любому бару, пошаговое проигрывание (`0.25x..4x`).
@@ -51,8 +52,9 @@ cd /ssd/www/personalmetatrader
 cp .env.example .env          # заполните DB_PASS и APP_KEY
 php bin/migrate.php           # применение схемы database/schema.sql
 sh deploy/install-mql.sh      # установка/обновление песочницы MQL/Pine
+php bin/backfill.php --status # статус фоновой докачки истории свечей
 ```
-Очистка устаревшего кэша свечей и старых логов алертов: `php bin/prune.php` (cron/timer).
+Очистка логов и просроченных токенов (история свечей `market_candles` сохраняется полностью, для явной чистки свечей используйте `--prune-candles`): `php bin/prune.php`.
 
 ## Проверка и тесты
 ```bash

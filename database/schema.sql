@@ -74,6 +74,21 @@ CREATE TABLE IF NOT EXISTS market_candles (
   FOREIGN KEY (symbol_id) REFERENCES trading_symbols(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS candle_sync_state (
+  symbol_id INT UNSIGNED NOT NULL,
+  tf VARCHAR(4) NOT NULL,
+  earliest_ms BIGINT UNSIGNED NULL,
+  latest_ms BIGINT UNSIGNED NULL,
+  bars_count INT UNSIGNED NOT NULL DEFAULT 0,
+  backfill_done TINYINT(1) NOT NULL DEFAULT 0,
+  priority TINYINT UNSIGNED NOT NULL DEFAULT 5,
+  last_error VARCHAR(255) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (symbol_id, tf),
+  KEY ix_queue (backfill_done, priority, updated_at),
+  FOREIGN KEY (symbol_id) REFERENCES trading_symbols(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS chart_templates (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id INT UNSIGNED NOT NULL,

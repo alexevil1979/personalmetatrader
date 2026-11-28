@@ -5,7 +5,7 @@
   const LAYOUT_LABELS = { '1': '▢', '2v': '◫', '2h': '⬓', '3': '◧', '4': '⊞', '6': '⊟' };
   const CMP_COLORS = ['#ff9800', '#e91e63', '#00bcd4', '#9c27b0', '#4caf50'];
   const DEFAULT_WATCH = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'BNBUSDT', 'ADAUSDT', 'LINKUSDT', 'AVAXUSDT', 'TONUSDT'];
-  const PAGE = 500, MAX_CANDLES = 20000;
+  const PAGE = 1000, MAX_CANDLES = 100000;
 
   const $ = (s) => document.querySelector(s);
   const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -183,10 +183,13 @@
       $('#setTabNotify').classList.toggle('on', id === 'notify');
       $('#setTabBybit').classList.toggle('on', id === 'bybit');
       $('#setTabChart').classList.toggle('on', id === 'chart');
+      $('#setTabHist').classList.toggle('on', id === 'hist');
       $('#setPanProfile').classList.toggle('hidden', id !== 'profile');
       $('#setPanNotify').classList.toggle('hidden', id !== 'notify');
       $('#setPanBybit').classList.toggle('hidden', id !== 'bybit');
       $('#setPanChart').classList.toggle('hidden', id !== 'chart');
+      $('#setPanHist').classList.toggle('hidden', id !== 'hist');
+      if (id === 'hist') loadHistStatus();
       say('');
     };
     const showBybitState = (j) => {
@@ -202,6 +205,28 @@
     $('#setTabNotify').onclick = () => tab('notify');
     $('#setTabBybit').onclick = () => tab('bybit');
     $('#setTabChart').onclick = () => tab('chart');
+    $('#setTabHist').onclick = () => tab('hist');
+    const fmtDate = (sec) => (sec ? new Date(sec * 1000).toISOString().slice(0, 10) : '—');
+    async function loadHistStatus() {
+      const sumEl = $('#histSummary'), bodyEl = $('#histRows');
+      sumEl.textContent = 'Загрузка статистики истории свечей…';
+      try {
+        const h = await call('GET', 'history/status');
+        sumEl.innerHTML = `Свечей в БД: <b>${Number(h.totalBars || 0).toLocaleString('ru-RU')}</b> · Размер: <b>${h.tableMb} MB</b> · Свободно на диске: <b>${h.freeDiskGb} GB</b> (мин. ${h.minFreeGb} GB)<br>ТФ-очередь: готово <b>${h.done}</b> · в очереди <b>${h.pending}</b>`;
+        bodyEl.innerHTML = (h.symbols || []).map((s) =>
+          `<tr><td><b>${esc(s.symbol)}</b> <small style="color:var(--mut)">${esc(s.category)}</small></td><td>${s.doneTfs}/${s.totalTfs}</td><td>${Number(s.bars).toLocaleString('ru-RU')}</td><td>${fmtDate(s.earliestSec)} → ${fmtDate(s.latestSec)}</td></tr>`
+        ).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--mut)">Очередь пока пуста</td></tr>';
+      } catch (e) { sumEl.textContent = 'Ошибка: ' + e.message; }
+    }
+    $('#histRefreshBtn').onclick = () => loadHistStatus();
+    $('#histSyncSymBtn').onclick = async () => {
+      const p = panes[active]; if (!p) return;
+      try {
+        await call('POST', 'history/sync', null, { category: p.cfg.category, symbol: p.cfg.symbol });
+        say(`Символ ${p.cfg.symbol} поставлен в приоритет полной докачки`, true);
+        loadHistStatus();
+      } catch (e) { say(e.message); }
+    };
     const syncChartInputs = () => {
       const o = state.chartOpts;
       $('#setColUp').value = o.upColor || (state.theme === 'dark' ? '#26a69a' : '#16a085');
@@ -789,7 +814,15 @@
     }
     async zoomDays(days) {
       if (!this.candles.length) return;
-      if (days === 'all') { this.chart.timeScale().fitContent(); return; }
+      if (days === 'all') {
+        while (!this.exhausted && this.candles.length < MAX_CANDLES) {
+          const prev = this.candles.length;
+          await this.loadOlder();
+          if (this.candles.length === prev) break;
+        }
+        this.chart.timeScale().fitContent();
+        return;
+      }
       const to = this.candles[this.candles.length - 1].time, from = to - (+days) * 86400;
       while (from < this.candles[0].time && !this.exhausted && this.candles.length < MAX_CANDLES) {
         const prev = this.candles.length;
@@ -2309,7 +2342,9 @@ if showLabels and ta.crossunder(close, ma)
       const grid = [{ name: p1, min: parseFloat($('#tOptMin1').value), max: parseFloat($('#tOptMax1').value), step: parseFloat($('#tOptStep1').value) }];
       if (p2 && p2 !== p1) grid.push({ name: p2, min: parseFloat($('#tOptMin2').value), max: parseFloat($('#tOptMax2').value), step: parseFloat($('#tOptStep2').value) });
       const inputs = {}; document.querySelectorAll('#tInputs [data-ti]').forEach((i) => { inputs[i.dataset.ti] = i.dataset.k === 'bool' ? i.checked : i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
-      const to = Math.floor(Date.now() / 1000), body = { id, category: $('#tCat').value, symbol: $('#tSym').value.trim().toUpperCase(), tf: $('#tTf').value, from: to - (+$('#tPeriod').value) * 86400, to, inputs, grid, metric: $('#tOptMetric').value };
+      const pVal = $('#tPeriod').value, to = Math.floor(Date.now() / 1000);
+      const body = { id, category: $('#tCat').value, symbol: $('#tSym').value.trim().toUpperCase(), tf: $('#tTf').value, to, inputs, grid, metric: $('#tOptMetric').value };
+      if (pVal === 'all') { body.period = 'all'; body.from = 0; } else body.from = to - (+pVal) * 86400;
       const num = (sel, key) => { const v = $(sel).value.trim(); if (v !== '') body[key] = parseFloat(v); };
       num('#tCap', 'initial_capital'); num('#tComm', 'commission_value'); num('#tSlip', 'slippage_ticks'); if ($('#tComm').value.trim() !== '') body.commission_type = 'percent';
       $('#tOptRun').disabled = true; $('#tOptOut').innerHTML = '<div style="padding:12px;color:var(--mut)">Оптимизация сетки параметров…</div>';
@@ -2357,7 +2392,9 @@ if showLabels and ta.crossunder(close, ma)
     $('#tRun').onclick = async () => {
       const id = +$('#tScript').value; if (!id) { tMsg('Выберите стратегию', true); return; }
       const inputs = {}; document.querySelectorAll('#tInputs [data-ti]').forEach((i) => { inputs[i.dataset.ti] = i.dataset.k === 'bool' ? i.checked : i.dataset.k === 'string' ? i.value : parseFloat(i.value); });
-      const to = Math.floor(Date.now() / 1000), body = { id, category: $('#tCat').value, symbol: $('#tSym').value.trim().toUpperCase(), tf: $('#tTf').value, from: to - (+$('#tPeriod').value) * 86400, to, inputs };
+      const pVal = $('#tPeriod').value, to = Math.floor(Date.now() / 1000);
+      const body = { id, category: $('#tCat').value, symbol: $('#tSym').value.trim().toUpperCase(), tf: $('#tTf').value, to, inputs };
+      if (pVal === 'all') { body.period = 'all'; body.from = 0; } else body.from = to - (+pVal) * 86400;
       const num = (sel, key) => { const v = $(sel).value.trim(); if (v !== '') body[key] = parseFloat(v); };
       num('#tCap', 'initial_capital'); num('#tComm', 'commission_value'); num('#tSlip', 'slippage_ticks'); if ($('#tComm').value.trim() !== '') body.commission_type = 'percent';
       $('#tRun').disabled = true; tMsg('Считаю… (загрузка истории Bybit может занять до минуты)');

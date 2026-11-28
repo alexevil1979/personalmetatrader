@@ -10,12 +10,14 @@ use PMT\Core\Db;
 final class Market
 {
     public const CATEGORIES = ['spot', 'linear', 'inverse'];
-    /** tf code => [bybit interval, step in seconds (0 = variable, month)] */
+    /** tf code => step in seconds (0 = variable, month) */
     public const TF = [
         '1' => 60, '3' => 180, '5' => 300, '15' => 900, '30' => 1800,
         '60' => 3600, '120' => 7200, '240' => 14400, '360' => 21600, '720' => 43200,
         'D' => 86400, 'W' => 604800, 'M' => 0,
     ];
+    public const HIGH_TFS = ['M', 'W', 'D', '720', '360', '240', '120', '60', '30', '15'];
+    public const LOW_TFS = ['5', '3', '1'];
 
     public static function checkCategory(string $c): string
     {
@@ -101,6 +103,87 @@ final class Market
         return (int) $id;
     }
 
+    /** Enqueue a symbol for full historical backfill in candle_sync_state. */
+    public static function enqueueSymbol(int $sid, bool $allTfs = true, int $priority = 1): void
+    {
+        try {
+            $pdo = Db::pdo();
+            $st = $pdo->prepare(
+                'INSERT INTO candle_sync_state (symbol_id, tf, priority) VALUES (?,?,?)
+                 ON DUPLICATE KEY UPDATE priority = LEAST(priority, VALUES(priority))'
+            );
+            foreach (self::HIGH_TFS as $tf) {
+                $st->execute([$sid, $tf, $priority]);
+            }
+            if ($allTfs) {
+                foreach (self::LOW_TFS as $tf) {
+                    $st->execute([$sid, $tf, $priority + 1]);
+                }
+            }
+        } catch (\Throwable) {
+            // ignore pre-migration state
+        }
+    }
+
+    /** Batched multi-row INSERT ... ON DUPLICATE KEY UPDATE into market_candles. */
+    public static function upsertCandles(int $sid, string $tf, array $rows, int $closedLimit): int
+    {
+        $closed = [];
+        foreach ($rows as $c) {
+            if ((int) $c['open_time'] <= $closedLimit) {
+                $closed[] = $c;
+            }
+        }
+        if (!$closed) {
+            return 0;
+        }
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        foreach (array_chunk($closed, 500) as $chunk) {
+            $placeholders = [];
+            $params = [];
+            foreach ($chunk as $c) {
+                $placeholders[] = '(?,?,?,?,?,?,?,?,?)';
+                $params[] = $sid;
+                $params[] = $tf;
+                $params[] = (int) $c['open_time'];
+                $params[] = $c['open'];
+                $params[] = $c['high'];
+                $params[] = $c['low'];
+                $params[] = $c['close'];
+                $params[] = $c['volume'];
+                $params[] = $c['turnover'] ?? 0;
+            }
+            $sql = 'INSERT INTO market_candles (symbol_id, tf, open_time, open, high, low, close, volume, turnover) VALUES '
+                . implode(',', $placeholders)
+                . ' ON DUPLICATE KEY UPDATE open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), volume=VALUES(volume), turnover=VALUES(turnover)';
+            $pdo->prepare($sql)->execute($params);
+        }
+        $pdo->commit();
+        return count($closed);
+    }
+
+    /** Earliest cached candle timestamp (UTC seconds) for (category, symbol, tf). */
+    public static function earliestTime(string $category, string $symbol, string $tf): ?int
+    {
+        $sid = self::symbolId($category, $symbol);
+        $pdo = Db::pdo();
+        try {
+            $st = $pdo->prepare('SELECT earliest_ms FROM candle_sync_state WHERE symbol_id=? AND tf=?');
+            $st->execute([$sid, $tf]);
+            $v = $st->fetchColumn();
+            if ($v !== false && $v !== null) {
+                return intdiv((int) $v, 1000);
+            }
+        } catch (\Throwable) {
+            // table may not exist yet
+        }
+        $st = $pdo->prepare('SELECT MIN(open_time) FROM market_candles WHERE symbol_id=? AND tf=?');
+        $st->execute([$sid, $tf]);
+        $v = $st->fetchColumn();
+        return ($v !== false && $v !== null) ? intdiv((int) $v, 1000) : null;
+    }
+
     /** All tickers of a category, cached 2s. Keyed by symbol. */
     public static function tickers(string $category): array
     {
@@ -128,9 +211,21 @@ final class Market
         });
     }
 
+    private static function syncState(int $sid, string $tf): ?array
+    {
+        try {
+            $st = Db::pdo()->prepare('SELECT earliest_ms, latest_ms, backfill_done FROM candle_sync_state WHERE symbol_id=? AND tf=?');
+            $st->execute([$sid, $tf]);
+            $row = $st->fetch();
+            return $row ?: null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     /**
      * Candles ascending. $endMs null => latest. Closed candles are cached in MySQL (dedup by PK);
-     * historical pages are served from the DB when contiguous, otherwise fetched from Bybit.
+     * historical pages are served DB-first when backfilled or contiguous, otherwise fetched from Bybit.
      */
     public static function candles(string $category, string $symbol, string $tf, ?int $endMs, int $limit): array
     {
@@ -140,15 +235,38 @@ final class Market
         $nowMs = (int) (microtime(true) * 1000);
         $pdo = Db::pdo();
 
-        if ($endMs !== null && $step > 0) {
-            $st = $pdo->prepare(
-                'SELECT open_time, open, high, low, close, volume FROM market_candles
-                 WHERE symbol_id=? AND tf=? AND open_time<=? ORDER BY open_time DESC LIMIT ' . $limit
-            );
-            $st->execute([$sid, $tf, $endMs]);
-            $rows = $st->fetchAll();
-            if (count($rows) === $limit && ((int) $rows[0]['open_time'] - (int) $rows[$limit - 1]['open_time']) === ($limit - 1) * $step) {
-                return self::format(array_reverse($rows));
+        // Automatically schedule full backfill for any symbol requested by a user.
+        Cache::remember("enq:$sid", 3600, static function () use ($sid): int {
+            self::enqueueSymbol($sid, true, 1);
+            return 1;
+        });
+
+        $sync = self::syncState($sid, $tf);
+
+        if ($endMs !== null) {
+            $done = $sync && (int) $sync['backfill_done'] === 1;
+            $latestMs = $sync && $sync['latest_ms'] !== null ? (int) $sync['latest_ms'] : null;
+            if ($done && $latestMs !== null && $endMs <= $latestMs + max($step, 86400000)) {
+                $st = $pdo->prepare(
+                    'SELECT open_time, open, high, low, close, volume FROM market_candles
+                     WHERE symbol_id=? AND tf=? AND open_time<=? ORDER BY open_time DESC LIMIT ' . $limit
+                );
+                $st->execute([$sid, $tf, $endMs]);
+                $rows = $st->fetchAll();
+                if ($rows || ($sync['earliest_ms'] !== null && $endMs < (int) $sync['earliest_ms'])) {
+                    return self::format(array_reverse($rows));
+                }
+            }
+            if ($step > 0) {
+                $st = $pdo->prepare(
+                    'SELECT open_time, open, high, low, close, volume FROM market_candles
+                     WHERE symbol_id=? AND tf=? AND open_time<=? ORDER BY open_time DESC LIMIT ' . $limit
+                );
+                $st->execute([$sid, $tf, $endMs]);
+                $rows = $st->fetchAll();
+                if (count($rows) === $limit && ((int) $rows[0]['open_time'] - (int) $rows[$limit - 1]['open_time']) === ($limit - 1) * $step) {
+                    return self::format(array_reverse($rows));
+                }
             }
         }
 
@@ -156,7 +274,21 @@ final class Market
         if ($endMs !== null) {
             $q['end'] = $endMs;
         }
-        $r = Client::get('/v5/market/kline', $q);
+        try {
+            $r = Client::get('/v5/market/kline', $q);
+        } catch (\Throwable $e) {
+            // DB fallback on transient Bybit error when cached candles exist
+            $sql = $endMs !== null
+                ? 'SELECT open_time, open, high, low, close, volume FROM market_candles WHERE symbol_id=? AND tf=? AND open_time<=? ORDER BY open_time DESC LIMIT ' . $limit
+                : 'SELECT open_time, open, high, low, close, volume FROM market_candles WHERE symbol_id=? AND tf=? ORDER BY open_time DESC LIMIT ' . $limit;
+            $st = $pdo->prepare($sql);
+            $st->execute($endMs !== null ? [$sid, $tf, $endMs] : [$sid, $tf]);
+            $cached = $st->fetchAll();
+            if ($cached) {
+                return self::format(array_reverse($cached));
+            }
+            throw $e;
+        }
         $rows = [];
         $seen = [];
         foreach ($r['list'] ?? [] as $k) {
@@ -171,18 +303,7 @@ final class Market
 
         // Persist only closed candles.
         $closedLimit = $step > 0 ? $nowMs - $step : $nowMs - 31 * 86400000;
-        $ins = $pdo->prepare(
-            'INSERT INTO market_candles (symbol_id, tf, open_time, open, high, low, close, volume, turnover)
-             VALUES (?,?,?,?,?,?,?,?,?)
-             ON DUPLICATE KEY UPDATE open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), volume=VALUES(volume), turnover=VALUES(turnover)'
-        );
-        $pdo->beginTransaction();
-        foreach ($rows as $c) {
-            if ($c['open_time'] <= $closedLimit) {
-                $ins->execute([$sid, $tf, $c['open_time'], $c['open'], $c['high'], $c['low'], $c['close'], $c['volume'], $c['turnover']]);
-            }
-        }
-        $pdo->commit();
+        self::upsertCandles($sid, $tf, $rows, $closedLimit);
         return self::format($rows);
     }
 
@@ -205,9 +326,24 @@ final class Market
         return $all;
     }
 
-    /** Candles within [fromSec, toSec] (ascending), at most $max, paged backwards via the cache-aware candles(). */
-    public static function candlesRange(string $category, string $symbol, string $tf, int $fromSec, int $toSec, int $max = 20000): array
+    /** Candles within [fromSec, toSec] (ascending), at most $max, DB-first when backfilled or paged via cache-aware candles(). */
+    public static function candlesRange(string $category, string $symbol, string $tf, int $fromSec, int $toSec, int $max = 100000): array
     {
+        $sid = self::symbolId($category, $symbol);
+        $step = self::TF[$tf] * 1000;
+        $sync = self::syncState($sid, $tf);
+        if ($sync && (int) $sync['backfill_done'] === 1 && $sync['latest_ms'] !== null) {
+            $tol = max($step * 2, 86400000);
+            if ((int) $sync['latest_ms'] >= $toSec * 1000 - $tol) {
+                $st = Db::pdo()->prepare(
+                    'SELECT open_time, open, high, low, close, volume FROM market_candles
+                     WHERE symbol_id=? AND tf=? AND open_time>=? AND open_time<=? ORDER BY open_time ASC LIMIT ' . max(1, min(100000, $max))
+                );
+                $st->execute([$sid, $tf, $fromSec * 1000, $toSec * 1000]);
+                return self::format($st->fetchAll());
+            }
+        }
+
         $all = [];
         $end = $toSec * 1000;
         while (count($all) < $max) {

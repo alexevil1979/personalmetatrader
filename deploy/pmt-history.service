@@ -1,0 +1,18 @@
+[Unit]
+Description=PersonalMetaTrader full Bybit candle history backfill & sync daemon
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+User=pmt
+Group=pmt
+WorkingDirectory=/ssd/www/personalmetatrader
+ExecStart=/usr/bin/php /ssd/www/personalmetatrader/bin/backfill.php --daemon
+Restart=always
+RestartSec=10
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+[Install]
+WantedBy=multi-user.target

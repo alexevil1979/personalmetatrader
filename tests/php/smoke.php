@@ -10,6 +10,7 @@ $root = dirname(__DIR__, 2);
 require $root . '/src/bootstrap.php';
 
 use PMT\Bybit\Client;
+use PMT\Bybit\HistorySync;
 use PMT\Bybit\Market;
 use PMT\Core\Alerts;
 use PMT\Core\Crypto;
@@ -118,5 +119,17 @@ echo "OK Paper::calcPnl\n";
 $sig = Client::buildSign('1700000000000', 'mykey', '5000', 'accountType=UNIFIED', 'mysecret');
 assertSameVal(hash_hmac('sha256', '1700000000000mykey5000accountType=UNIFIED', 'mysecret'), $sig, 'bybit buildSign');
 echo "OK Bybit::buildSign\n";
+
+// 8. HistorySync timeframe coverage & disk guardrails
+assertSameVal(true, HistorySync::minFreeGb() >= 5.0, 'history minFreeGb');
+assertSameVal(true, HistorySync::freeDiskGb(__DIR__) > 0.0, 'history freeDiskGb');
+assertSameVal(count(Market::TF), count(Market::HIGH_TFS) + count(Market::LOW_TFS), 'market tf partition');
+foreach (HistorySync::EXCHANGE_TFS as $htf) {
+    assertSameVal($htf, Market::checkTf($htf), 'exchange tf valid ' . $htf);
+}
+foreach (HistorySync::DEFAULT_WATCH as $wsym) {
+    assertSameVal($wsym, Market::checkSymbol($wsym), 'default watch valid ' . $wsym);
+}
+echo "OK HistorySync\n";
 
 echo "ALL PHP SMOKE TESTS PASSED\n";

@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // Retention cleanup for market_candles, logs, expired auth tokens and rate-limit cache files.
-// Usage: php bin/prune.php [--dry-run]
+// Usage: php bin/prune.php [--dry-run] [--prune-candles]
 if (PHP_SAPI !== 'cli') {
     exit(1);
 }
@@ -12,6 +12,7 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 use PMT\Core\Db;
 
 $dry = in_array('--dry-run', $argv, true);
+$pruneCandles = in_array('--prune-candles', $argv, true);
 $pdo = Db::pdo();
 $now = time();
 
@@ -22,21 +23,25 @@ $candlePolicies = [
 ];
 
 $totalCandles = 0;
-foreach ($candlePolicies as $p) {
-    $cutoffMs = ($now - $p['days'] * 86400) * 1000;
-    $in = implode(',', array_fill(0, count($p['tfs']), '?'));
-    $params = array_merge($p['tfs'], [$cutoffMs]);
-    if ($dry) {
-        $st = $pdo->prepare("SELECT COUNT(*) FROM market_candles WHERE tf IN ($in) AND open_time < ?");
-        $st->execute($params);
-        $cnt = (int) $st->fetchColumn();
-    } else {
-        $st = $pdo->prepare("DELETE FROM market_candles WHERE tf IN ($in) AND open_time < ?");
-        $st->execute($params);
-        $cnt = $st->rowCount();
+if ($pruneCandles) {
+    foreach ($candlePolicies as $p) {
+        $cutoffMs = ($now - $p['days'] * 86400) * 1000;
+        $in = implode(',', array_fill(0, count($p['tfs']), '?'));
+        $params = array_merge($p['tfs'], [$cutoffMs]);
+        if ($dry) {
+            $st = $pdo->prepare("SELECT COUNT(*) FROM market_candles WHERE tf IN ($in) AND open_time < ?");
+            $st->execute($params);
+            $cnt = (int) $st->fetchColumn();
+        } else {
+            $st = $pdo->prepare("DELETE FROM market_candles WHERE tf IN ($in) AND open_time < ?");
+            $st->execute($params);
+            $cnt = $st->rowCount();
+        }
+        $totalCandles += $cnt;
+        echo sprintf("candles[%s > %dd]: %d\n", implode(',', $p['tfs']), $p['days'], $cnt);
     }
-    $totalCandles += $cnt;
-    echo sprintf("candles[%s > %dd]: %d\n", implode(',', $p['tfs']), $p['days'], $cnt);
+} else {
+    echo "candles: preserved (pass --prune-candles to trim old bars)\n";
 }
 
 $pruneTable = static function (string $sqlCount, string $sqlDel) use ($pdo, $dry): int {

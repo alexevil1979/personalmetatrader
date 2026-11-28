@@ -370,7 +370,7 @@
       <label>Рынок <select id="tCat"><option value="linear">USDT/USDC Perp</option><option value="spot">Spot</option><option value="inverse">Inverse</option></select></label>
       <label>Символ <input id="tSym" placeholder="BTCUSDT"></label>
       <label>Таймфрейм <select id="tTf"></select></label>
-      <label>Период <select id="tPeriod"><option value="30">30 дней</option><option value="90" selected>90 дней</option><option value="180">180 дней</option><option value="365">1 год</option><option value="730">2 года</option></select></label>
+      <label>Период <select id="tPeriod"><option value="30">30 дней</option><option value="90" selected>90 дней</option><option value="180">180 дней</option><option value="365">1 год</option><option value="730">2 года</option><option value="1095">3 года</option><option value="1825">5 лет</option><option value="all">Вся история</option></select></label>
       <label>Капитал <input id="tCap" type="number" placeholder="из скрипта"></label>
       <label>Комиссия, % <input id="tComm" type="number" step="any" placeholder="из скрипта"></label>
       <label>Проскальзывание, тиков <input id="tSlip" type="number" step="any" placeholder="из скрипта"></label>
@@ -429,6 +429,7 @@
     <button id="setTabNotify" class="settab">Уведомления</button>
     <button id="setTabBybit" class="settab">Bybit API</button>
     <button id="setTabChart" class="settab">График</button>
+    <button id="setTabHist" class="settab">История БД</button>
   </div>
   <div id="setPanProfile" class="setpan">
     <div class="setacct"><div class="setava" id="setAva">A</div><div><div class="setemail" id="setEmail"></div><div class="setsub">Ваша учётная запись</div></div></div>
@@ -475,6 +476,14 @@
     <label class="chk"><input type="checkbox" id="setMagCross"> Магнит перекрестия (к OHLC свечи)</label>
     <label class="chk"><input type="checkbox" id="setQuickTrade"> Панель торговли в один клик (Buy/Sell на графике)</label>
     <div class="setbtns"><button id="setChartReset" class="btnsec" type="button">Сбросить вид по умолчанию</button></div>
+  </div>
+  <div id="setPanHist" class="setpan hidden">
+    <div id="histSummary" class="setnote">Загрузка статистики истории свечей…</div>
+    <div class="setbtns">
+      <button id="histRefreshBtn" class="btnsec" type="button">Обновить</button>
+      <button id="histSyncSymBtn" class="btnpri" type="button">Докачать активный символ</button>
+    </div>
+    <div class="hist-wrap"><table class="opt-tbl"><thead><tr><th>Символ</th><th>ТФ</th><th>Свечей</th><th>Период</th></tr></thead><tbody id="histRows"></tbody></table></div>
   </div>
   <div id="setMsg"></div>
 </div></div>
