@@ -203,7 +203,7 @@ final class Api
                 return;
             }
             if ($path === '/api/mql/run' && $method === 'POST') {
-                if (!Cache::rateLimit('mqlrun:' . $uid, 120)) {
+                if (!Cache::rateLimit('mqlrun:' . $uid, 360)) {
                     self::out(['error' => 'rate limit'], 429);
                     return;
                 }
@@ -214,10 +214,11 @@ final class Api
                         throw new InvalidArgumentException('bad inputs');
                     }
                 }
+                $endSec = isset($b['endTime']) && is_numeric($b['endTime']) && (int) $b['endTime'] > 0 ? (int) $b['endTime'] : null;
                 self::out(Scripts::run(
                     $uid, (int) ($b['id'] ?? 0), Market::checkCategory((string) ($b['category'] ?? 'linear')),
                     Market::checkSymbol((string) ($b['symbol'] ?? '')), Market::checkTf((string) ($b['tf'] ?? '60')),
-                    $inputs, (int) ($b['limit'] ?? 1500), isset($b['version']) ? (int) $b['version'] : null
+                    $inputs, (int) ($b['limit'] ?? 1500), isset($b['version']) ? (int) $b['version'] : null, $endSec
                 ));
                 return;
             }

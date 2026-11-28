@@ -187,14 +187,14 @@ final class Scripts
         return self::exec(['mode' => 'describe', 'lang' => $r['lang'], 'source' => self::source($uid, $id, $r['lang'], (int) $r['current_version'])]);
     }
 
-    public static function run(int $uid, int $id, string $cat, string $sym, string $tf, array $inputs, int $limit, ?int $ver = null): array
+    public static function run(int $uid, int $id, string $cat, string $sym, string $tf, array $inputs, int $limit, ?int $ver = null, ?int $endSec = null): array
     {
         $r = self::row($uid, $id);
         if (!in_array($r['lang'], ['mq4', 'mq5', 'pine'], true)) {
             return ['ok' => false, 'error' => 'EX4/EX5 не исполняются: нужна среда MetaTrader (см. docs/MQL.md)', 'kind' => 'unsupported'];
         }
         $limit = max(50, min(3000, $limit));
-        $candles = Market::candlesN($cat, $sym, $tf, $limit);
+        $candles = Market::candlesN($cat, $sym, $tf, $limit, $endSec);
         $info = Db::pdo()->prepare('SELECT price_scale, tick_size FROM trading_symbols WHERE exchange_id=1 AND category=? AND symbol=?');
         $info->execute([$cat, $sym]);
         $si = $info->fetch() ?: ['price_scale' => 2, 'tick_size' => 0.01];
@@ -217,7 +217,32 @@ final class Scripts
                 if ($sec < $mainSec) {
                     return ['ok' => false, 'error' => 'request.security: таймфрейм "' . $stf . '" ниже таймфрейма графика — не поддерживается', 'kind' => 'mql'];
                 }
-                $extra[(string) $stf] = Market::candlesN($cat, $sym, (string) $stf, min(1500, (int) ceil($limit * $mainSec / $sec) + 10));
+                $htfBars = Market::candlesN($cat, $sym, (string) $stf, min(1500, (int) ceil($limit * $mainSec / $sec) + 10), $endSec);
+                // Prevent future OHLC leakage on the currently forming HTF bar during replay
+                if ($endSec !== null && $htfBars) {
+                    $lastIdx = count($htfBars) - 1;
+                    $lastBar = $htfBars[$lastIdx];
+                    if ($lastBar['time'] + $sec > $endSec + $mainSec) {
+                        $sub = array_values(array_filter($candles, static fn($c) => $c['time'] >= $lastBar['time'] && $c['time'] <= $endSec));
+                        if ($sub) {
+                            $hi = $sub[0]['high'];
+                            $lo = $sub[0]['low'];
+                            $vol = 0.0;
+                            foreach ($sub as $sb) {
+                                $hi = max($hi, $sb['high']);
+                                $lo = min($lo, $sb['low']);
+                                $vol += $sb['volume'];
+                            }
+                            $htfBars[$lastIdx] = [
+                                'time' => $lastBar['time'], 'open' => $sub[0]['open'], 'high' => $hi,
+                                'low' => $lo, 'close' => $sub[count($sub) - 1]['close'], 'volume' => $vol,
+                            ];
+                        } else {
+                            array_pop($htfBars);
+                        }
+                    }
+                }
+                $extra[(string) $stf] = $htfBars;
             }
         }
         $t0 = microtime(true);
@@ -230,8 +255,10 @@ final class Scripts
         $lvl = ($res['ok'] ?? false) ? 'info' : 'error';
         $msg = ($res['ok'] ?? false) ? 'run ok' : ('run failed: ' . ($res['error'] ?? '?') . (isset($res['line']) ? ' (line ' . $res['line'] . ')' : ''));
         $logs = implode("\n", array_slice($res['logs'] ?? [], 0, 50));
-        Db::pdo()->prepare('INSERT INTO script_execution_logs (script_id, version, level, message, duration_ms) VALUES (?,?,?,?,?)')
-            ->execute([$id, (int) $r['current_version'], $lvl, mb_substr($msg . ($logs !== '' ? "\n" . $logs : ''), 0, 60000), $ms]);
+        if ($endSec === null || $lvl === 'error') {
+            Db::pdo()->prepare('INSERT INTO script_execution_logs (script_id, version, level, message, duration_ms) VALUES (?,?,?,?,?)')
+                ->execute([$id, (int) $r['current_version'], $lvl, mb_substr($msg . ($logs !== '' ? "\n" . $logs : ''), 0, 60000), $ms]);
+        }
         if ($lvl === 'error') {
             Log::write('mql', mb_substr($msg, 0, 300), $uid, ['script' => $id], 'warn');
         }

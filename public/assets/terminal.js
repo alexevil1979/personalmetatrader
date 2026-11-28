@@ -938,6 +938,12 @@
       const cut = Math.max(1, Math.min(all.length - 1, idx));
       this.replay = { all, idx: cut };
       this.candles = all.slice(0, cut + 1);
+      for (const st of Object.values(this.mql || {})) { st.key = ''; st.res = null; }
+      const cutTime = all[cut].time;
+      for (const cm of this.cmpSeries) {
+        const sub = cm.pts.filter((x) => x.time <= cutTime);
+        cm.series.setData(sub.map(({ time, value }) => ({ time, value })));
+      }
       this.render();
       this.updateQuickTrade();
       this.chart.timeScale().scrollToRealTime();
@@ -950,9 +956,14 @@
       const s = this.series(this.candles);
       this.main.update(s[s.length - 1]);
       this.vol.update(this.volData([c])[0]);
+      for (const cm of this.cmpSeries) {
+        const pt = cm.pts.find((x) => x.time === c.time);
+        if (pt) cm.series.update({ time: pt.time, value: pt.value });
+      }
       this.scheduleInd(true);
       this.cross(null);
       this.updateQuickTrade();
+      if (this === panes[active]) PMTMarket.renderTaPanel(this);
       if (window.PMTTrade) PMTTrade.onBarTick(this.cfg.category, this.cfg.symbol, c, true);
       return this.replay.idx + 1 < this.replay.all.length;
     }
@@ -960,7 +971,9 @@
       if (!this.replay) return;
       this.candles = this.replay.all;
       this.replay = null;
+      for (const st of Object.values(this.mql || {})) { st.key = ''; st.res = null; }
       this.render();
+      this.syncCompares();
       this.refreshLatest();
     }
     async refreshLatest() {
@@ -1072,27 +1085,39 @@
 
     // ---------- MQL scripts ----------
     mqlSt(inst) { return (this.mql = this.mql || {})[inst.uid] || (this.mql[inst.uid] = {}); }
-    mqlKey(inst) { const n = this.candles.length; return [this.cfg.category, this.cfg.symbol, this.cfg.tf, inst.scriptId, inst.version || 0, JSON.stringify(inst.params), n ? this.candles[n - 1].time : 0].join('|'); }
+    mqlKey(inst) { const n = this.candles.length; return [this.replay ? 'R' : 'L', this.cfg.category, this.cfg.symbol, this.cfg.tf, inst.scriptId, inst.version || 0, JSON.stringify(inst.params), n ? this.candles[n - 1].time : 0].join('|'); }
     async runMql(inst, force) {
       const st = this.mqlSt(inst), key = this.mqlKey(inst);
-      if (st.busy || !this.candles.length || (!force && st.key === key) || (force && Date.now() - (st.at || 0) < 5000)) return;
+      if (st.busy || !this.candles.length || (!force && st.key === key) || (!this.replay && force && Date.now() - (st.at || 0) < 5000)) return;
       st.busy = true; st.at = Date.now();
+      const wasReplay = !!this.replay, lastT = this.candles[this.candles.length - 1].time;
+      const body = { id: inst.scriptId, category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, inputs: inst.params, limit: 1500, version: inst.version };
+      if (wasReplay) body.endTime = lastT;
       try {
-        const r = await call('POST', 'mql/run', null, { id: inst.scriptId, category: this.cfg.category, symbol: this.cfg.symbol, tf: this.cfg.tf, inputs: inst.params, limit: 1500, version: inst.version });
-        st.res = r.ok ? r : st.res; st.err = r.ok ? null : r.error + (r.line ? ` (строка ${r.line})` : ''); st.logs = r.logs || [];
-        if (!r.ok) logConsole(inst.name, 'err', st.err, r.line);
-        else (r.logs || []).forEach((ln) => logConsole(inst.name, ln.includes('[ERROR]') ? 'err' : ln.includes('[WARN]') ? 'warn' : 'info', ln));
-      } catch (e) { st.err = e.message; logConsole(inst.name, 'err', e.message); }
-      st.key = key; st.busy = false;
-      if (this.main) {
-        this.refreshIndicators(true);
-        if (st.res && st.res.barcolors && st.res.barcolors.some(Boolean)) this.main.setData(this.series(this.candles));
-      }
+        const r = await call('POST', 'mql/run', null, body);
+        if (!!this.replay !== wasReplay) { st.busy = false; if (this.main) this.runMql(inst, false); return; }
+        const curLast = this.candles.length ? this.candles[this.candles.length - 1].time : 0;
+        const fresh = !wasReplay || !(r.ok && r.times && r.times.length && r.times[r.times.length - 1] > curLast);
+        if (fresh) {
+          st.res = r.ok ? r : st.res; st.err = r.ok ? null : r.error + (r.line ? ` (строка ${r.line})` : ''); st.logs = r.logs || [];
+          st.key = key;
+          if (!r.ok) logConsole(inst.name, 'err', st.err, r.line);
+          else if (!wasReplay) (r.logs || []).forEach((ln) => logConsole(inst.name, ln.includes('[ERROR]') ? 'err' : ln.includes('[WARN]') ? 'warn' : 'info', ln));
+          if (this.main) {
+            this.refreshIndicators(true);
+            this.cross(null);
+            if (st.res && st.res.barcolors && st.res.barcolors.some(Boolean)) this.main.setData(this.series(this.candles));
+          }
+        }
+      } catch (e) { st.err = e.message; if (!wasReplay) logConsole(inst.name, 'err', e.message); st.key = key; }
+      st.busy = false;
+      if (this.main && this.mqlKey(inst) !== key) this.runMql(inst, false);
     }
     mqlItem(inst, full, paneIdx, markers) {
       const st = this.mqlSt(inst), res = st.res, sep = res && res.info.window === 'separate';
       if (st.key !== this.mqlKey(inst)) this.runMql(inst, false);
       if (!res) return null;
+      if (this.replay && res.times && res.times.length && this.candles.length && res.times[res.times.length - 1] > this.candles[this.candles.length - 1].time) return null;
       let it = this.ind.find((x) => x.inst === inst);
       if (it && !full) return sep ? 'sep' : null;
       const LC = LightweightCharts, pane = sep ? paneIdx + 1 : 0, times = res.times, n = times.length;

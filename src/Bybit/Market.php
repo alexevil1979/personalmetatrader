@@ -307,11 +307,11 @@ final class Market
         return self::format($rows);
     }
 
-    /** Latest $n candles ascending, paged back through candles() (uses the MySQL cache for older pages). */
-    public static function candlesN(string $category, string $symbol, string $tf, int $n): array
+    /** Latest $n candles ascending (up to optional $endSec), paged back through candles() (uses the MySQL cache for older pages). */
+    public static function candlesN(string $category, string $symbol, string $tf, int $n, ?int $endSec = null): array
     {
         $all = [];
-        $end = null;
+        $end = $endSec !== null ? $endSec * 1000 : null;
         while (count($all) < $n) {
             $chunk = self::candles($category, $symbol, $tf, $end, min(1000, $n - count($all)));
             if (!$chunk) {
@@ -321,6 +321,12 @@ final class Market
             $end = $chunk[0]['time'] * 1000 - 1;
             if (count($chunk) < 2) {
                 break;
+            }
+        }
+        if ($endSec !== null) {
+            $all = array_values(array_filter($all, static fn($c) => $c['time'] <= $endSec));
+            if (count($all) > $n) {
+                $all = array_slice($all, -$n);
             }
         }
         return $all;
